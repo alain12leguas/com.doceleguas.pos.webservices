@@ -5,4 +5,9 @@
         <class>com.doceleguas.pos.webservices.MasterDataWebService</class>
         <singleton>true</singleton>
     </bean>
+        <bean>
+        <name>GetMasterDataModels</name>
+        <class>com.doceleguas.pos.webservices.GetMasterDataModelsWebService</class>
+        <singleton>true</singleton>
+    </bean>
 </provider>
