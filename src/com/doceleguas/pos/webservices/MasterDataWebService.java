@@ -49,7 +49,7 @@ public class MasterDataWebService implements WebService {
       setTimeout.invoke(modelInstance, jsonsent.optLong("timeout", 10000));
       response.setContentType("application/json");
       response.setCharacterEncoding("UTF-8");
-      response.getWriter().write("{");
+      response.getWriter().write("{\"model\":\"" + modelName + "\",");
       modelInstance.exec(response.getWriter(), jsonsent);
       response.getWriter().write("}");
     } catch (Exception e) {
