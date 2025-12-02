@@ -1,6 +1,5 @@
 package com.doceleguas.pos.webservices;
 
-import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -11,27 +10,14 @@ import javax.servlet.http.HttpServletResponse;
 import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
-import org.openbravo.mobile.core.process.WebServiceServletUtils;
 import org.openbravo.service.web.WebService;
 
 public class GetMasterDataModelsWebService implements WebService {
-
-  // @Inject
-  // @Any
-  // private Instance<MasterDataProcessHQLQuery> masterDataQueries;
 
   @Override
   public void doGet(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     try {
-      // List<String> modelNames = masterDataQueries.stream()
-      // .map(MasterDataProcessHQLQuery::getName)
-      // .filter(java.util.Optional::isPresent)
-      // .map(java.util.Optional::get)
-      // .collect(Collectors.toList());
-      //
-      // Instance<MasterDataProcessHQLQuery> allMasterDataQueries = CDI.current()
-      // .select(MasterDataProcessHQLQuery.class);
       List<String> modelNames = WeldUtils.getInstances(MasterDataProcessHQLQuery.class)
           .stream()
           .map(MasterDataProcessHQLQuery::getName)
@@ -82,10 +68,6 @@ public class GetMasterDataModelsWebService implements WebService {
       throws Exception {
     // TODO Auto-generated method stub
 
-  }
-
-  protected String getRequestContent(HttpServletRequest request) throws IOException {
-    return WebServiceServletUtils.getRequestContent(request);
   }
 
 }

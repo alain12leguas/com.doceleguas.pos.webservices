@@ -1,6 +1,5 @@
 package com.doceleguas.pos.webservices;
 
-import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Method;
 import java.util.Map;
@@ -15,7 +14,6 @@ import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
-import org.openbravo.mobile.core.process.WebServiceServletUtils;
 import org.openbravo.service.web.WebService;
 
 public class MasterDataWebService implements WebService {
@@ -25,9 +23,9 @@ public class MasterDataWebService implements WebService {
       throws Exception {
     try {
       // \"_offset\":1,
-      String jsonString = "{\"csrfToken\":\"126D2537BF02493EAB64127F306DDE1D\",\"appName\":\"POS2\","
+      String jsonString = "{\"csrfToken\":\"126D2537BF02493EAB64127F306DDE1D\",\"appName\":\"POS\","
           + "\"client\":\"39363B0921BB4293B48383844325E84C\",\"organization\":\"D270A5AC50874F8BA67A88EE977F8E3B\","
-          + "\"pos\":\"1C9CB2318D17467BA0A76DB6CF309213\",\"terminalName\":\"VBS-2\",\"timeout\":100000,"
+          + "\"pos\":\"9104513C2D0741D4850AE8493998A7C8\",\"terminalName\":\"VBS-1\",\"timeout\":100000,"
           + "\"parameters\":{\"terminalTime\":\"2025-11-21T04:37:33.413Z\","
           + "\"terminalTimeOffset\":{\"value\":240}},"
           + "\"incremental\":false,\"_isMasterdata\":true,\"lastId\":null,\"clientQueryIndex\":-1}";
@@ -80,10 +78,6 @@ public class MasterDataWebService implements WebService {
       throws Exception {
     // TODO Auto-generated method stub
 
-  }
-
-  protected String getRequestContent(HttpServletRequest request) throws IOException {
-    return WebServiceServletUtils.getRequestContent(request);
   }
 
   private MasterDataProcessHQLQuery getModelInstance(String modelName) throws Exception {
