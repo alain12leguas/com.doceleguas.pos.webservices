@@ -24,14 +24,17 @@ public class MasterDataWebService implements WebService {
     try {
       // \"_offset\":1,
       String jsonString = "{\"csrfToken\":\"126D2537BF02493EAB64127F306DDE1D\",\"appName\":\"POS\","
-          + "\"client\":\"39363B0921BB4293B48383844325E84C\",\"organization\":\"D270A5AC50874F8BA67A88EE977F8E3B\","
-          + "\"pos\":\"9104513C2D0741D4850AE8493998A7C8\",\"terminalName\":\"VBS-1\",\"timeout\":100000,"
+          + "\"timeout\":100000,"
           + "\"parameters\":{\"terminalTime\":\"2025-11-21T04:37:33.413Z\","
           + "\"terminalTimeOffset\":{\"value\":240}},"
           + "\"incremental\":false,\"_isMasterdata\":true,\"lastId\":null,\"clientQueryIndex\":-1}";
       JSONObject jsonsent = new JSONObject(jsonString);
-
       final String modelName = request.getParameter("model");
+      jsonsent.put("client", request.getParameter("client"));
+      jsonsent.put("organization", request.getParameter("organization"));
+      jsonsent.put("pos", request.getParameter("pos"));
+      jsonsent.put("termnalName", request.getParameter("terminalName"));
+      
       requestParamsToJson(jsonsent, request);
       OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
           OBContext.getOBContext().getRole().getId(),
