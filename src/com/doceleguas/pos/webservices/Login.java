@@ -32,7 +32,11 @@ public class Login extends MobileCoreLoginHandler {
       JSONObject role = new JSONObject();
       role.put("id", defaultRole.getId());
       role.put("name", defaultRole.getName());
-      jsonResponse.put("role", role);
+      JSONObject user = new JSONObject();
+      user.put("role", role);
+      user.put("name", OBContext.getOBContext().getUser().getName());
+      user.put("id", OBContext.getOBContext().getUser().getId());
+      jsonResponse.put("user", user);
       PrintWriter writer = res.getWriter();
       writer.print(jsonResponse.toString());
       writer.flush();
