@@ -41,6 +41,8 @@ public class LoadTerminal implements WebService {
           jsonsent.optString("organization",
               OBContext.getOBContext().getCurrentOrganization().getId()));
       JSONObject terminalJson = terminal.exec(jsonsent);
+      response.setContentType("application/json");
+      response.setCharacterEncoding("UTF-8");
       response.getWriter().print(terminalJson.toString());
     } catch (Exception e) {
       JSONObject errorResponse = new JSONObject();
