@@ -19,14 +19,14 @@ import org.openbravo.dal.service.OBQuery;
 import org.openbravo.erpCommon.utility.OBError;
 import org.openbravo.erpCommon.utility.OBMessageUtils;
 import org.openbravo.mobile.core.MobileDefaults;
-import org.openbravo.mobile.core.login.MobileCoreLoginHandler;
 import org.openbravo.mobile.core.login.ProfileUtils;
 import org.openbravo.model.ad.access.Role;
 import org.openbravo.model.ad.access.User;
 import org.openbravo.model.ad.system.Language;
 import org.openbravo.retail.posterminal.POSDefaults;
+import org.openbravo.retail.posterminal.POSLoginHandler;
 
-public class Login extends MobileCoreLoginHandler {
+public class Login extends POSLoginHandler {
   private static final long serialVersionUID = 1L;
 
   @Override
@@ -36,19 +36,24 @@ public class Login extends MobileCoreLoginHandler {
       ResponseBufferWrapper wrappedRes = new ResponseBufferWrapper(res);
       super.doPost(req, wrappedRes);
       JSONObject jsonResponse = new JSONObject(wrappedRes.getCapturedContent());
-      Role defaultRole = OBContext.getOBContext().getUser().getOBPOSDefaultPOSRole();
-      if (defaultRole == null) {
-        throw new RoleDoNotExistException();
+      if (jsonResponse.optBoolean("showMessage", false) && jsonResponse.optString("messageTitle")
+          .equals("Web POS terminal (%0) does not exist")) {
+        jsonResponse.put("messageTitle", "");
       }
-      JSONObject user = new JSONObject();
-      user.put("name", OBContext.getOBContext().getUser().getName());
-      user.put("id", OBContext.getOBContext().getUser().getId());
-      user.put("defaultRole", getDefaultRoleJson());
-      user.put("roles", getRoles());
-      user.put("defaultLanguage", getDefaultLanguageJson());
-      user.put("languages", getLanguages());
-      jsonResponse.put("user", user);
-
+      if (!jsonResponse.optBoolean("showMessage", false)) {
+        Role defaultRole = OBContext.getOBContext().getUser().getOBPOSDefaultPOSRole();
+        if (defaultRole == null) {
+          throw new RoleDoNotExistException();
+        }
+        JSONObject user = new JSONObject();
+        user.put("name", OBContext.getOBContext().getUser().getName());
+        user.put("id", OBContext.getOBContext().getUser().getId());
+        user.put("defaultRole", getDefaultRoleJson());
+        user.put("roles", getRoles());
+        user.put("defaultLanguage", getDefaultLanguageJson());
+        user.put("languages", getLanguages());
+        jsonResponse.put("user", user);
+      }
       // JSONObject profilesJson = profile.exec(new JSONObject("{\"appName\":\"WebPOS\"}"));
       PrintWriter writer = res.getWriter();
       writer.print(jsonResponse.toString());
