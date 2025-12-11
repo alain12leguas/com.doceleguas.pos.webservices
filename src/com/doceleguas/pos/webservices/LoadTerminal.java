@@ -10,8 +10,12 @@ import javax.servlet.http.HttpServletResponse;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.hibernate.criterion.Restrictions;
 import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.dal.core.OBContext;
+import org.openbravo.dal.service.OBCriteria;
+import org.openbravo.dal.service.OBDal;
+import org.openbravo.retail.posterminal.OBPOSApplications;
 import org.openbravo.retail.posterminal.term.Terminal;
 import org.openbravo.service.web.WebService;
 
@@ -34,7 +38,10 @@ public class LoadTerminal implements WebService {
       // jsonsent.put("termnalName", request.getParameter("terminalName"));
 
       requestParamsToJson(jsonsent, request);
-      // jsonsent.put("parameters", new JSONObject());
+      OBPOSApplications app = getTerminal(jsonsent.getString("terminalName"));
+      jsonsent.put("client", app.getOrganization().getClient().getId());
+      jsonsent.put("organization", app.getOrganization().getId());
+      jsonsent.put("pos", app.getId());
       OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
           OBContext.getOBContext().getRole().getId(),
           jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
@@ -56,6 +63,14 @@ public class LoadTerminal implements WebService {
         e1.printStackTrace();
       }
     }
+  }
+
+  private OBPOSApplications getTerminal(String searchKey) {
+    OBCriteria<OBPOSApplications> terminalCriteria = OBDal.getInstance()
+        .createCriteria(OBPOSApplications.class);
+    terminalCriteria.add(Restrictions.eq(OBPOSApplications.PROPERTY_SEARCHKEY, searchKey));
+    terminalCriteria.setMaxResults(1);
+    return (OBPOSApplications) terminalCriteria.uniqueResult();
   }
 
   public JSONObject requestParamsToJson(JSONObject jsonParams, HttpServletRequest request)
