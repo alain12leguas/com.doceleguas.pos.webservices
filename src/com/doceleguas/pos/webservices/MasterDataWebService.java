@@ -1,6 +1,8 @@
 package com.doceleguas.pos.webservices;
 
 import java.io.PrintWriter;
+import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Map;
 
 import javax.enterprise.inject.spi.CDI;
@@ -10,9 +12,11 @@ import javax.servlet.http.HttpServletResponse;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.openbravo.base.weld.WeldUtils;
+import org.openbravo.dal.core.OBContext;
+import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
+import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
 import org.openbravo.service.web.WebService;
-
-import com.doceleguas.pos.webservices.Model.ModelAnnotation;
 
 public class MasterDataWebService implements WebService {
 
@@ -21,38 +25,39 @@ public class MasterDataWebService implements WebService {
       throws Exception {
     try {
       // \"_offset\":1,
-      // String jsonString =
-      // "{\"csrfToken\":\"126D2537BF02493EAB64127F306DDE1D\",\"appName\":\"POS\","
-      // + "\"timeout\":100000," + "\"parameters\":{\"terminalTime\":\"2025-11-21T04:37:33.413Z\","
-      // + "\"terminalTimeOffset\":{\"value\":240}},"
-      // + "\"incremental\":false,\"_isMasterdata\":true,\"lastId\":null,\"clientQueryIndex\":-1}";
-      // JSONObject jsonsent = new JSONObject(jsonString);
+      String jsonString = "{\"csrfToken\":\"126D2537BF02493EAB64127F306DDE1D\",\"appName\":\"POS\","
+          + "\"timeout\":100000," + "\"parameters\":{\"terminalTime\":\"2025-11-21T04:37:33.413Z\","
+          + "\"terminalTimeOffset\":{\"value\":240}},"
+          + "\"incremental\":false,\"_isMasterdata\":true,\"lastId\":null,\"clientQueryIndex\":-1}";
+      JSONObject jsonsent = new JSONObject(jsonString);
+      final String modelName = request.getParameter("model");
+      jsonsent.put("client", request.getParameter("client"));
+      jsonsent.put("organization", request.getParameter("organization"));
+      jsonsent.put("pos", request.getParameter("pos"));
+      jsonsent.put("termnalName", request.getParameter("terminalName"));
+
+      requestParamsToJson(jsonsent, request);
+      OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
+          OBContext.getOBContext().getRole().getId(),
+          jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
+          jsonsent.optString("organization",
+              OBContext.getOBContext().getCurrentOrganization().getId()));
+
+      MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
+      // Workaround using Reflection to configure process timeout
+      Method setTimeout = MasterDataProcessHQLQuery.class.getDeclaredMethod("setTimeout",
+          Long.class);
+      setTimeout.setAccessible(true);
+      setTimeout.invoke(modelInstance, jsonsent.optLong("timeout", 10000));
       // final String modelName = request.getParameter("model");
-      // jsonsent.put("client", request.getParameter("client"));
-      // jsonsent.put("organization", request.getParameter("organization"));
-      // jsonsent.put("pos", request.getParameter("pos"));
-      // jsonsent.put("termnalName", request.getParameter("terminalName"));
-      //
-      // requestParamsToJson(jsonsent, request);
-      // OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
-      // OBContext.getOBContext().getRole().getId(),
-      // jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
-      // jsonsent.optString("organization",
-      // OBContext.getOBContext().getCurrentOrganization().getId()));
-      //
-      // MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
-      // // Workaround using Reflection to configure process timeout
-      // Method setTimeout = MasterDataProcessHQLQuery.class.getDeclaredMethod("setTimeout",
-      // Long.class);
-      // setTimeout.setAccessible(true);
-      // setTimeout.invoke(modelInstance, jsonsent.optLong("timeout", 10000));\
-
-      Model model = getModelInstance("OCBusinessPartner");
-
+      // Model model = getModelInstance(modelName);
+      // JSONObject parameters = new JSONObject();
+      // requestParamsToJson(parameters, request);
+      // JSONObject data = model.exec(parameters);
       response.setContentType("application/json");
       response.setCharacterEncoding("UTF-8");
-      // response.getWriter().write("{\"model\":\"" + modelName + "\",");
-      // modelInstance.exec(response.getWriter(), jsonsent);
+      response.getWriter().write("{\"model\":\"" + modelName + "\",");
+      modelInstance.exec(response.getWriter(), jsonsent);
       response.getWriter().write("}");
     } catch (Exception e) {
       JSONObject errorResponse = new JSONObject();
@@ -84,10 +89,24 @@ public class MasterDataWebService implements WebService {
 
   }
 
-  private Model getModelInstance(String modelName) throws Exception {
+  private MasterDataProcessHQLQuery getModelInstance(String modelName) throws Exception {
     try {
+      return (MasterDataProcessHQLQuery) CDI.current()
+          .select(new MasterDataModel.Literal(modelName))
+          .get();
+    } catch (Exception e) {
+      throw new MasterDataLoaderError("Error loading model " + modelName, e);
+    }
+  }
 
-      return (Model) CDI.current().select(new ModelAnnotation.Literal(modelName)).get();
+  private Model getModelInstanceNew(String modelName) throws Exception {
+    try {
+      // return (Model) CDI.current().select(new ModelAnnotation.Literal(modelName)).get();
+      List<Model> allModels = WeldUtils.getInstances(Model.class);
+      return allModels.stream()
+          .filter(model -> model.getName().equals(modelName))
+          .findFirst()
+          .get();
     } catch (Exception e) {
       throw new MasterDataLoaderError("Error loading model " + modelName, e);
     }
