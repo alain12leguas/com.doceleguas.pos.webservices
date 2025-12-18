@@ -52,6 +52,12 @@ public class MasterDataWebService implements WebService {
         Model model = getModelInstanceNew(modelName);
         JSONObject parameters = new JSONObject();
         requestParamsToJson(parameters, request);
+        String regex = "(?i)\\b(select|update|delete|drop)\\b";
+        String selectList = parameters.getString("selectList")
+            .replaceAll(regex, "")
+            .trim()
+            .replaceAll(" +", " ");
+        parameters.put("selectList", selectList);
         JSONArray data = model.exec(parameters);
         response.getWriter().write("\"data\":" + data.toString() + "}");
         // response.getWriter().write(parameters.toString());

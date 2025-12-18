@@ -23,56 +23,33 @@ public class OCBusinessPartner extends Model {
     // String organization = jsonParams.getString("organization");
     // String organizationList = StringUtils
     // .join(new OrganizationStructureProvider().getNaturalTree(organization), ",");
-    String sql = "SELECT businesspa0_.c_bpartner_id  AS id,"
-        + "       businesspa0_.ad_org_id AS ad_org_id," //
-        + "       businesspa0_.NAME AS name," //
-        + "       businesspa0_.value," //
-        + "       businesspa0_.description," //
-        + "       businesspa0_.taxid," //
-        + "       businesspa0_.so_bp_taxcategory_id," //
-        + "       businesspa0_.m_pricelist_id," //
-        + "       businesspa0_.fin_paymentmethod_id," //
-        + "       businesspa0_.c_paymentterm_id," //
-        + "       businesspa0_.invoicerule," //
-        + "       aduserlist4_.email," //
-        + "       aduserlist4_.ad_user_id," //
-        + "       aduserlist4_.phone," //
-        + "       aduserlist4_.phone2," //
-        + "       aduserlist4_.firstname," //
-        + "       aduserlist4_.lastname," //
-        + "       pricingpri1_.istaxincluded," //
-        + "       pricingpri1_.c_currency_id," //
-        // + " pricingpri1_.NAME ," //
-        + "       businesspa0_.c_bp_group_id," //
-        + "       adlanguage2_.ad_language," //
-        + "       adlanguage2_.NAME as language_name," //
-        + "       greeting3_.c_greeting_id,"//
-        // + " greeting3_.NAME,"//
-        + "       aduserlist4_.comments,"//
-        + "       businesspa0_.so_creditlimit - businesspa0_.so_creditused," //
-        + "       aduserlist4_.commercialauth,"//
-        + "       aduserlist4_.viaemail,"//
-        + "       aduserlist4_.viasms,"//
-        + "       aduserlist4_.commercialdate " //
-        + "FROM   c_bpartner businesspa0_"//
+    String selectList = jsonParams.getString("selectList");
+    Long limit = jsonParams.optLong("limit", 1000);
+    String lastId = jsonParams.optString("lastId");
+    String sql = "SELECT " + selectList + " " //
+        + " FROM  c_bpartner e"//
         + "       INNER JOIN m_pricelist pricingpri1_" //
-        + "               ON businesspa0_.m_pricelist_id = pricingpri1_.m_pricelist_id"//
+        + "               ON e.m_pricelist_id = pricingpri1_.m_pricelist_id"//
         + "       LEFT OUTER JOIN ad_language adlanguage2_"//
-        + "                    ON businesspa0_.ad_language = adlanguage2_.ad_language"//
+        + "                    ON e.ad_language = adlanguage2_.ad_language"//
         + "       LEFT OUTER JOIN c_greeting greeting3_"//
-        + "                    ON businesspa0_.c_greeting_id = greeting3_.c_greeting_id"//
+        + "                    ON e.c_greeting_id = greeting3_.c_greeting_id"//
         + "       LEFT OUTER JOIN ad_user aduserlist4_"//
-        + "                    ON businesspa0_.c_bpartner_id = aduserlist4_.c_bpartner_id"//
+        + "                    ON e.c_bpartner_id = aduserlist4_.c_bpartner_id"//
         + "       CROSS JOIN c_bp_group businesspa5_ "
-        + "WHERE  businesspa0_.c_bp_group_id = businesspa5_.c_bp_group_id" //
-        + "       AND 1 = 1" //
-        + "       AND businesspa0_.iscustomer = 'Y'" //
-        + "       AND businesspa0_.isactive = 'Y'"//
-        + " AND ( businesspa0_.ad_client_id IN :clients )"//
-        + " AND ( businesspa0_.ad_org_id IN :orgs )"//
+        + " WHERE  e.c_bp_group_id = businesspa5_.c_bp_group_id" //
+        + " AND 1 = 1" //
+        + " AND e.iscustomer = 'Y'" //
+        + " AND e.isactive = 'Y'"//
+        + " AND ( e.ad_client_id IN :clients )"//
+        + " AND ( e.ad_org_id IN :orgs )"//
         + " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
-        + "FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=businesspa0_.C_BPartner_ID)) "
-        + "ORDER  BY businesspa0_.c_bpartner_id ";
+        + "     FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
+    if (lastId != null) {
+      sql += " AND e.c_bpartner_id > :lastId";
+    }
+    sql += " ORDER  BY e.c_bpartner_id " //
+        + " LIMIT :limit";
 
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
@@ -81,7 +58,11 @@ public class OCBusinessPartner extends Model {
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
                 .getNaturalTree(jsonParams.getString("organization")))
-        .scroll(ScrollMode.FORWARD_ONLY);
+        .setParameter("limit", limit);
+    if (lastId != null) {
+      query.setParameter("lastId", lastId);
+    }
+    query.scroll(ScrollMode.FORWARD_ONLY);
     ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
     int i = 0;
     JSONArray dataArray = new JSONArray();
