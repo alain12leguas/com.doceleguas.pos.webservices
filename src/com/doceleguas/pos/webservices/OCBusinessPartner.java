@@ -1,26 +1,28 @@
 package com.doceleguas.pos.webservices;
 
-import org.apache.commons.lang.StringUtils;
+import java.util.Map;
+
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.ScrollMode;
 import org.hibernate.ScrollableResults;
+import org.hibernate.query.NativeQuery;
+import org.hibernate.transform.Transformers;
 import org.openbravo.dal.core.OBContext;
-import org.openbravo.dal.security.OrganizationStructureProvider;
 import org.openbravo.dal.service.OBDal;
 
 public class OCBusinessPartner extends Model {
-
+  @SuppressWarnings("deprecation")
   @Override
   public JSONArray exec(JSONObject jsonParams) throws JSONException {
     // OBContext.getOBContext()
     // .getOrganizationStructureProvider()
     // .getNaturalTree(jsonsent.getString("organization"));
-    String clientList = StringUtils.join(OBContext.getOBContext().getReadableClients(), ",");
-    String organization = jsonParams.getString("organization");
-    String organizationList = StringUtils
-        .join(new OrganizationStructureProvider().getNaturalTree(organization), ",");
+    // String clientList = StringUtils.join(OBContext.getOBContext().getReadableClients(), ",");
+    // String organization = jsonParams.getString("organization");
+    // String organizationList = StringUtils
+    // .join(new OrganizationStructureProvider().getNaturalTree(organization), ",");
     String sql = "SELECT businesspa0_.c_bpartner_id  AS id,"
         + "       businesspa0_.ad_org_id AS ad_org_id," //
         + "       businesspa0_.NAME AS name," //
@@ -71,24 +73,23 @@ public class OCBusinessPartner extends Model {
         + " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
         + "FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=businesspa0_.C_BPartner_ID)) "
         + "ORDER  BY businesspa0_.c_bpartner_id ";
-    final ScrollableResults scroll = OBDal.getInstance()
-        .getSession()
-        .createNativeQuery(sql)
-        .setParameterList("clients", OBContext.getOBContext().getReadableClients())
+
+    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
+    query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
+    query.setParameterList("clients", OBContext.getOBContext().getReadableClients())
         .setParameterList("orgs",
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
                 .getNaturalTree(jsonParams.getString("organization")))
         .scroll(ScrollMode.FORWARD_ONLY);
-
+    ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
     int i = 0;
     JSONArray dataArray = new JSONArray();
     try {
       while (scroll.next()) {
-        final Object[] resultSet = scroll.get();
-        final String id = (String) resultSet[0];
-        JSONObject res = new JSONObject();
-        res.put(id, id);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
+        JSONObject res = new JSONObject(rowMap);
         dataArray.put(res);
       }
       i++;

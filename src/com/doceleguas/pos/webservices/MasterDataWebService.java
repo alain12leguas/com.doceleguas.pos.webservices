@@ -8,6 +8,8 @@ import javax.enterprise.inject.spi.CDI;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -18,10 +20,12 @@ import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataMode
 import org.openbravo.service.web.WebService;
 
 public class MasterDataWebService implements WebService {
+  private static final Logger log = LogManager.getLogger();
 
   @Override
   public void doGet(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
+    final String modelName = request.getParameter("model");
     try {
       // \"_offset\":1,
       String jsonString = "{\"csrfToken\":\"126D2537BF02493EAB64127F306DDE1D\",\"appName\":\"POS\","
@@ -29,7 +33,6 @@ public class MasterDataWebService implements WebService {
           + "\"terminalTimeOffset\":{\"value\":240}},"
           + "\"incremental\":false,\"_isMasterdata\":true,\"lastId\":null,\"clientQueryIndex\":-1}";
       JSONObject jsonsent = new JSONObject(jsonString);
-      final String modelName = request.getParameter("model");
       jsonsent.put("client", request.getParameter("client"));
       jsonsent.put("organization", request.getParameter("organization"));
       jsonsent.put("pos", request.getParameter("pos"));
@@ -67,6 +70,7 @@ public class MasterDataWebService implements WebService {
       modelInstance.exec(response.getWriter(), jsonsent);
       response.getWriter().write("}");
     } catch (Exception e) {
+      log.error("Error Loading Masterdata " + modelName + ": " + e.getMessage(), e);
       JSONObject errorResponse = new JSONObject();
       errorResponse.put("error", e.getMessage());
       PrintWriter out = response.getWriter();
