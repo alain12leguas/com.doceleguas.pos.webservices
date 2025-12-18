@@ -1,7 +1,6 @@
 package com.doceleguas.pos.webservices;
 
 import java.io.PrintWriter;
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
@@ -42,21 +41,29 @@ public class MasterDataWebService implements WebService {
           jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
           jsonsent.optString("organization",
               OBContext.getOBContext().getCurrentOrganization().getId()));
-
-      MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
-      // Workaround using Reflection to configure process timeout
-      Method setTimeout = MasterDataProcessHQLQuery.class.getDeclaredMethod("setTimeout",
-          Long.class);
-      setTimeout.setAccessible(true);
-      setTimeout.invoke(modelInstance, jsonsent.optLong("timeout", 10000));
-      // final String modelName = request.getParameter("model");
-      // Model model = getModelInstance(modelName);
-      // JSONObject parameters = new JSONObject();
-      // requestParamsToJson(parameters, request);
-      // JSONObject data = model.exec(parameters);
       response.setContentType("application/json");
       response.setCharacterEncoding("UTF-8");
       response.getWriter().write("{\"model\":\"" + modelName + "\",");
+
+      if (jsonsent.has("v2")) {
+        Model model = getModelInstanceNew(modelName);
+        JSONObject parameters = new JSONObject();
+        requestParamsToJson(parameters, request);
+        JSONArray data = model.exec(parameters);
+        response.getWriter().write("\"data\":" + data.toString() + "}");
+        // response.getWriter().write(parameters.toString());
+        // response.getWriter().write("");
+        return;
+      }
+      MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
+      // // Workaround using Reflection to configure process timeout
+      // Method setTimeout = MasterDataProcessHQLQuery.class.getDeclaredMethod("setTimeout",
+      // Long.class);
+      // setTimeout.setAccessible(true);
+      // setTimeout.invoke(modelInstance, jsonsent.optLong("timeout", 10000));
+
+      // final String modelName = request.getParameter("model");
+
       modelInstance.exec(response.getWriter(), jsonsent);
       response.getWriter().write("}");
     } catch (Exception e) {
