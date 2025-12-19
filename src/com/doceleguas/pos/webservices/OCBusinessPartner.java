@@ -25,7 +25,7 @@ public class OCBusinessPartner extends Model {
     // .join(new OrganizationStructureProvider().getNaturalTree(organization), ",");
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
-    String lastId = jsonParams.optString("lastId");
+    String lastId = jsonParams.optString("lastId", null);
     String sql = "SELECT " + selectList + " " //
         + " FROM  c_bpartner e"//
         + "       INNER JOIN m_pricelist pricingpri1_" //

@@ -17,6 +17,7 @@ import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
+import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
 public class MasterDataWebService implements WebService {
@@ -75,12 +76,13 @@ public class MasterDataWebService implements WebService {
 
       modelInstance.exec(response.getWriter(), jsonsent);
       response.getWriter().write("}");
-    } catch (Exception e) {
-      log.error("Error Loading Masterdata " + modelName + ": " + e.getMessage(), e);
+    } catch (Throwable t) {
+      Throwable cause = DbUtility.getUnderlyingSQLException(t);
+      log.error("Error Loading Masterdata ", cause);
       JSONObject errorResponse = new JSONObject();
-      errorResponse.put("error", e.getMessage());
+      errorResponse.put("error", cause.getMessage());
       PrintWriter out = response.getWriter();
-      out.print(errorResponse.toString());
+      out.print("\"exception\":" + errorResponse.toString() + "}");
       out.flush();
     }
   }
