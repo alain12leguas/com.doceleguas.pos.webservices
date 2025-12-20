@@ -47,7 +47,9 @@ public class MasterDataWebService implements WebService {
               OBContext.getOBContext().getCurrentOrganization().getId()));
       response.setContentType("application/json");
       response.setCharacterEncoding("UTF-8");
-      response.getWriter().write("{\"model\":\"" + modelName + "\",");
+      JSONObject responseJSON = new JSONObject();
+      responseJSON.put("model", modelName);
+      // response.getWriter().write("{\"model\":\"" + modelName + "\",");
 
       if (jsonsent.has("v2")) {
         Model model = getModelInstanceNew(modelName);
@@ -60,29 +62,22 @@ public class MasterDataWebService implements WebService {
             .replaceAll(" +", " ");
         parameters.put("selectList", selectList);
         JSONArray data = model.exec(parameters);
-        response.getWriter().write("\"data\":" + data.toString() + "}");
-        // response.getWriter().write(parameters.toString());
-        // response.getWriter().write("");
-        return;
+        responseJSON.put("data", data);
+        response.getWriter().write(responseJSON.toString());
+      } else {
+        MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
+        response.getWriter().write("{\"model\":\"" + modelName + "\",");
+        modelInstance.exec(response.getWriter(), jsonsent);
+        response.getWriter().write("}");
       }
-      MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
-      // // Workaround using Reflection to configure process timeout
-      // Method setTimeout = MasterDataProcessHQLQuery.class.getDeclaredMethod("setTimeout",
-      // Long.class);
-      // setTimeout.setAccessible(true);
-      // setTimeout.invoke(modelInstance, jsonsent.optLong("timeout", 10000));
-
-      // final String modelName = request.getParameter("model");
-
-      modelInstance.exec(response.getWriter(), jsonsent);
-      response.getWriter().write("}");
     } catch (Throwable t) {
       Throwable cause = DbUtility.getUnderlyingSQLException(t);
       log.error("Error Loading Masterdata ", cause);
       JSONObject errorResponse = new JSONObject();
-      errorResponse.put("error", cause.getMessage());
+      errorResponse.put("exception", cause.getMessage());
       PrintWriter out = response.getWriter();
-      out.print("\"exception\":" + errorResponse.toString() + "}");
+      out.print(errorResponse.toString());
+      // out.print("{\"exception\": \"error\"}");
       out.flush();
     }
   }
