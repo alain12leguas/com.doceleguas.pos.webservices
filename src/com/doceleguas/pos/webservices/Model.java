@@ -8,13 +8,15 @@ import java.lang.annotation.Target;
 import javax.enterprise.util.AnnotationLiteral;
 import javax.inject.Qualifier;
 
-import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.hibernate.query.NativeQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
 
 public abstract class Model {
-  public abstract JSONArray exec(JSONObject jsonsent) throws JSONException;
+  public abstract NativeQuery<?> createQuery(JSONObject jsonParams) throws JSONException;
+
+  // public abstract JSONArray exec(JSONObject jsonsent) throws JSONException;
 
   public abstract String getName();
 

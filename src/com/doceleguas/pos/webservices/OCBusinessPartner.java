@@ -1,12 +1,7 @@
 package com.doceleguas.pos.webservices;
 
-import java.util.Map;
-
-import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
-import org.hibernate.ScrollMode;
-import org.hibernate.ScrollableResults;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.Transformers;
 import org.openbravo.dal.core.OBContext;
@@ -15,7 +10,7 @@ import org.openbravo.dal.service.OBDal;
 public class OCBusinessPartner extends Model {
   @SuppressWarnings("deprecation")
   @Override
-  public JSONArray exec(JSONObject jsonParams) throws JSONException {
+  public NativeQuery<?> createQuery(JSONObject jsonParams) throws JSONException {
     // OBContext.getOBContext()
     // .getOrganizationStructureProvider()
     // .getNaturalTree(jsonsent.getString("organization"));
@@ -23,6 +18,7 @@ public class OCBusinessPartner extends Model {
     // String organization = jsonParams.getString("organization");
     // String organizationList = StringUtils
     // .join(new OrganizationStructureProvider().getNaturalTree(organization), ",");
+    String lastUpdated = jsonParams.optString("lastUpdated", null);
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
     String lastId = jsonParams.optString("lastId", null);
@@ -45,6 +41,9 @@ public class OCBusinessPartner extends Model {
         + " AND ( e.ad_org_id IN :orgs )"//
         + " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
         + "     FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
+    if (lastUpdated != null) {
+      sql += " AND e.updated > :lastUpdated";
+    }
     if (lastId != null) {
       sql += " AND e.c_bpartner_id > :lastId";
     }
@@ -62,27 +61,7 @@ public class OCBusinessPartner extends Model {
     if (lastId != null) {
       query.setParameter("lastId", lastId);
     }
-    query.scroll(ScrollMode.FORWARD_ONLY);
-    ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
-    int i = 0;
-    JSONArray dataArray = new JSONArray();
-    try {
-      while (scroll.next()) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
-        JSONObject res = new JSONObject(rowMap);
-        dataArray.put(res);
-      }
-      i++;
-      if (i % 100 == 0) {
-        OBDal.getInstance().flush();
-        OBDal.getInstance().getSession().clear();
-      }
-    } finally {
-      scroll.close();
-    }
-
-    return dataArray;
+    return query;
   }
 
   @Override

@@ -1,12 +1,7 @@
 package com.doceleguas.pos.webservices;
 
-import java.util.Map;
-
-import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
-import org.hibernate.ScrollMode;
-import org.hibernate.ScrollableResults;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.Transformers;
 import org.openbravo.dal.core.OBContext;
@@ -17,13 +12,13 @@ import org.openbravo.retail.posterminal.POSUtils;
 public class OCDiscount extends Model {
   @SuppressWarnings("deprecation")
   @Override
-  public JSONArray exec(JSONObject jsonParams) throws JSONException {
+  public NativeQuery<?> createQuery(JSONObject jsonParams) throws JSONException {
 
     String client = jsonParams.getString("client");
     String organization = jsonParams.getString("organization");
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
-    Long offset = jsonParams.optLong("offset", -1);
+    Long offset = jsonParams.optLong("offset", 0);
     String sql = "SELECT " + selectList + " " //
         + " FROM M_Offer e" //
         + " WHERE e.AD_Client_ID=:clientId" //
@@ -58,10 +53,13 @@ public class OCDiscount extends Model {
         + "                 AND pricingadj7_.M_Offer_ID=e.M_Offer_ID" //
         + "                 AND pricingadj7_.AD_Org_ID=:orgId)))" //
         + "  AND (e.EM_OBDISC_C_Currency_ID IS NULL" //
-        + "       OR e.EM_OBDISC_C_Currency_ID=:currencyId)"//
-        + " LIMIT :limit ";
-    if (offset != -1) {
-      sql += "OFFSET :offset";
+        + "       OR e.EM_OBDISC_C_Currency_ID=:currencyId)";//
+    if (jsonParams.optString("lastUpdated", null) != null) {
+      sql += " AND e.updated > :lastUpdated";
+    }
+    sql += " LIMIT :limit ";
+    if (offset != 0) {
+      sql += " OFFSET :offset";
     }
 
     PriceList priceList = POSUtils.getPriceListByOrgId(organization);
@@ -76,30 +74,10 @@ public class OCDiscount extends Model {
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
                 .getNaturalTree(organization));
-    if (offset != -1) {
+    if (offset != 0) {
       query.setParameter("offset", offset);
     }
-    query.scroll(ScrollMode.FORWARD_ONLY);
-    ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
-    int i = 0;
-    JSONArray dataArray = new JSONArray();
-    try {
-      while (scroll.next()) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
-        JSONObject res = new JSONObject(rowMap);
-        dataArray.put(res);
-      }
-      i++;
-      if (i % 100 == 0) {
-        OBDal.getInstance().flush();
-        OBDal.getInstance().getSession().clear();
-      }
-    } finally {
-      scroll.close();
-    }
-
-    return dataArray;
+    return query;
   }
 
   @Override

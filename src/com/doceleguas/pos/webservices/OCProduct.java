@@ -1,15 +1,11 @@
 package com.doceleguas.pos.webservices;
 
 import java.util.Date;
-import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
-import org.hibernate.ScrollMode;
-import org.hibernate.ScrollableResults;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.Transformers;
 import org.openbravo.dal.service.OBDal;
@@ -21,10 +17,11 @@ public class OCProduct extends Model {
 
   @SuppressWarnings("deprecation")
   @Override
-  public JSONArray exec(JSONObject jsonParams) throws JSONException {
+  public NativeQuery<?> createQuery(JSONObject jsonParams) throws JSONException {
 
     Long limit = jsonParams.optLong("limit", 1000);
     String lastId = jsonParams.optString("lastId", null);
+    String lastUpdated = jsonParams.optString("lastUpdated", null);
     String selectList = jsonParams.getString("selectList");
     String sql = "SELECT DISTINCT " + selectList + " " //
         + " FROM  m_product e" //
@@ -55,6 +52,9 @@ public class OCProduct extends Model {
         + "                            AND pricingpro18_.m_pricelist_version_id = :priceLisVersionId" //
         + "                            AND obretcopro17_.obretco_productlist_id = :productListId) )" //
         + "       AND 1 = 1 "; //
+    if (lastUpdated != null) {
+      sql += " AND e.updated > :lastUpdated";
+    }
     if (lastId != null) {
       sql += " AND e.m_product_id > :lastId";
     }
@@ -73,27 +73,7 @@ public class OCProduct extends Model {
     if (lastId != null) {
       query.setParameter("lastId", lastId);
     }
-    query.scroll(ScrollMode.FORWARD_ONLY);
-    ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
-    int i = 0;
-    JSONArray dataArray = new JSONArray();
-    try {
-      while (scroll.next()) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
-        JSONObject res = new JSONObject(rowMap);
-        dataArray.put(res);
-      }
-      i++;
-      if (i % 100 == 0) {
-        OBDal.getInstance().flush();
-        OBDal.getInstance().getSession().clear();
-      }
-    } finally {
-      scroll.close();
-    }
-
-    return dataArray;
+    return query;
   }
 
   @Override

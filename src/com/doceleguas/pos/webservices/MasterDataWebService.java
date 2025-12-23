@@ -1,6 +1,7 @@
 package com.doceleguas.pos.webservices;
 
 import java.io.PrintWriter;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -13,8 +14,12 @@ import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.hibernate.ScrollMode;
+import org.hibernate.ScrollableResults;
+import org.hibernate.query.NativeQuery;
 import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.dal.core.OBContext;
+import org.openbravo.dal.service.OBDal;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
 import org.openbravo.service.db.DbUtility;
@@ -38,8 +43,8 @@ public class MasterDataWebService implements WebService {
       jsonsent.put("organization", request.getParameter("organization"));
       jsonsent.put("pos", request.getParameter("pos"));
       jsonsent.put("termnalName", request.getParameter("terminalName"));
-
       requestParamsToJson(jsonsent, request);
+
       OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
           OBContext.getOBContext().getRole().getId(),
           jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
@@ -61,8 +66,31 @@ public class MasterDataWebService implements WebService {
             .trim()
             .replaceAll(" +", " ");
         parameters.put("selectList", selectList);
-        JSONArray data = model.exec(parameters);
-        responseJSON.put("data", data);
+        NativeQuery<?> query = model.createQuery(parameters);
+        String lastUpdated = jsonsent.optString("lastUpdated", null);
+        if (lastUpdated != null) {
+          query.setParameter("lastUpdated", Instant.ofEpochMilli(Long.parseLong(lastUpdated)));
+        }
+        query.scroll(ScrollMode.FORWARD_ONLY);
+        ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
+        int i = 0;
+        JSONArray dataArray = new JSONArray();
+        try {
+          while (scroll.next()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
+            JSONObject res = new JSONObject(rowMap);
+            dataArray.put(res);
+          }
+          i++;
+          if (i % 100 == 0) {
+            OBDal.getInstance().flush();
+            OBDal.getInstance().getSession().clear();
+          }
+        } finally {
+          scroll.close();
+        }
+        responseJSON.put("data", dataArray);
         response.getWriter().write(responseJSON.toString());
       } else {
         MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);
