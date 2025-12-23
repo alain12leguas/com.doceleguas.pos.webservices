@@ -30,28 +30,17 @@ public class OCProduct extends Model {
         + "       LEFT OUTER JOIN m_attributeset attributes2_" //
         + "                    ON e.m_attributeset_id =" //
         + "                       attributes2_.m_attributeset_id" //
-        + "       LEFT OUTER JOIN obretco_prol_product obretcopro3_" //
-        + "                    ON e.m_product_id = obretcopro3_.m_product_id" //
-        + "       LEFT OUTER JOIN m_productprice m_productprice_" //
+        + "       iNNER JOIN obretco_prol_product obretcopro_" //
+        + "                    ON e.m_product_id = obretcopro_.m_product_id" //
+        + "       INNER JOIN m_productprice m_productprice_" //
         + "                    ON e.m_product_id = m_productprice_.m_product_id" //
         + "       INNER JOIN c_uom c_uom_ on e.c_uom_id = c_uom_.c_uom_id" //
         + "       INNER JOIN m_product_category m_product_category_ on e.m_product_category_id=m_product_category_.m_product_category_id" //
         + " WHERE e.c_uom_id = c_uom_.c_uom_id" //
         + "       AND e.m_product_category_id = m_product_category_.m_product_category_id" //
-        + "       AND 1 = 1" //
         + "       AND m_productprice_.m_pricelist_version_id = :priceLisVersionId" //
-        + "       AND e.isactive = 'Y'" //
-        + "       AND ( EXISTS (SELECT 1" //
-        + "                     FROM   m_product product16_" //
-        + "                            LEFT OUTER JOIN obretco_prol_product obretcopro17_" //
-        + "                                         ON product16_.m_product_id =" //
-        + "                                            obretcopro17_.m_product_id" //
-        + "                            INNER JOIN m_productprice pricingpro18_ on product16_.m_product_id=pricingpro18_.m_product_id" //
-        + "                     WHERE  product16_.m_product_id =" //
-        + "                                pricingpro18_.m_product_id" //
-        + "                            AND pricingpro18_.m_pricelist_version_id = :priceLisVersionId" //
-        + "                            AND obretcopro17_.obretco_productlist_id = :productListId) )" //
-        + "       AND 1 = 1 "; //
+        + "       AND obretcopro_.obretco_productlist_id = :productListId" //
+        + "       AND e.isactive = 'Y'";
     if (lastUpdated != null) {
       sql += " AND e.updated > :lastUpdated";
     }
