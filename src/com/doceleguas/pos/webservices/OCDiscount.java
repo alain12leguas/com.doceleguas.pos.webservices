@@ -156,13 +156,22 @@ public class OCDiscount extends Model {
   @Override
   public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
     JSONObject recordJson = new JSONObject(rowMap);
-    recordJson.put(FILTER_BPCATEGORY_ALIAS,
-        new JSONArray((String) rowMap.get(FILTER_BPCATEGORY_ALIAS)));
-    recordJson.put(FILTER_BPARTNER_ALIAS,
-        new JSONArray((String) rowMap.get(FILTER_BPARTNER_ALIAS)));
-    recordJson.put(FILTER_PRODUCTCATEGORY_ALIAS,
-        new JSONArray((String) rowMap.get(FILTER_PRODUCTCATEGORY_ALIAS)));
-    recordJson.put(FILTER_PRODUCT_ALIAS, new JSONArray((String) rowMap.get(FILTER_PRODUCT_ALIAS)));
+    if (rowMap.get(FILTER_BPCATEGORY_ALIAS) != null) {
+      recordJson.put(FILTER_BPCATEGORY_ALIAS,
+          new JSONArray((String) rowMap.get(FILTER_BPCATEGORY_ALIAS)));
+    }
+    if (rowMap.get(FILTER_BPARTNER_ALIAS) != null) {
+      recordJson.put(FILTER_BPARTNER_ALIAS,
+          new JSONArray((String) rowMap.get(FILTER_BPARTNER_ALIAS)));
+    }
+    if (rowMap.get(FILTER_PRODUCTCATEGORY_ALIAS) != null) {
+      recordJson.put(FILTER_PRODUCTCATEGORY_ALIAS,
+          new JSONArray((String) rowMap.get(FILTER_PRODUCTCATEGORY_ALIAS)));
+    }
+    if (rowMap.get(FILTER_PRODUCT_ALIAS) != null) {
+      recordJson.put(FILTER_PRODUCT_ALIAS,
+          new JSONArray((String) rowMap.get(FILTER_PRODUCT_ALIAS)));
+    }
     return recordJson;
   }
 

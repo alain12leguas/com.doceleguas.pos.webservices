@@ -97,7 +97,9 @@ public class OCBusinessPartner extends Model {
   @Override
   public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
     JSONObject recordJson = new JSONObject(rowMap);
-    recordJson.put("locations", new JSONArray((String) rowMap.get("locations")));
+    if (rowMap.get("locations") != null) {
+      recordJson.put("locations", new JSONArray((String) rowMap.get("locations")));
+    }
     return recordJson;
   }
 }
