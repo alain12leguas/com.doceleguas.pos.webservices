@@ -79,7 +79,7 @@ public class MasterDataWebService implements WebService {
           while (scroll.next()) {
             @SuppressWarnings("unchecked")
             Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
-            JSONObject res = new JSONObject(rowMap);
+            JSONObject res = model.rowToJson(rowMap);
             dataArray.put(res);
           }
           i++;
@@ -90,7 +90,6 @@ public class MasterDataWebService implements WebService {
         } finally {
           scroll.close();
         }
-        model.transformResult(dataArray);
         responseJSON.put("data", dataArray);
         response.getWriter().write(responseJSON.toString());
       } else {

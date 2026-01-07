@@ -1,5 +1,7 @@
 package com.doceleguas.pos.webservices;
 
+import java.util.Map;
+
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -152,25 +154,16 @@ public class OCDiscount extends Model {
   }
 
   @Override
-  public void transformResult(JSONArray data) throws JSONException {
-
-    for (int i = 0; i < data.length(); i++) {
-      JSONObject record = data.getJSONObject(i);
-      if (record.optString(FILTER_BPCATEGORY_ALIAS, null) != null) {
-        record.put(FILTER_BPCATEGORY_ALIAS,
-            new JSONArray(record.getString(FILTER_BPCATEGORY_ALIAS)));
-      }
-      if (record.optString(FILTER_BPARTNER_ALIAS, null) != null) {
-        record.put(FILTER_BPARTNER_ALIAS, new JSONArray(record.getString(FILTER_BPARTNER_ALIAS)));
-      }
-      if (record.optString(FILTER_PRODUCTCATEGORY_ALIAS, null) != null) {
-        record.put(FILTER_PRODUCTCATEGORY_ALIAS,
-            new JSONArray(record.getString(FILTER_PRODUCTCATEGORY_ALIAS)));
-      }
-      if (record.optString(FILTER_PRODUCT_ALIAS, null) != null) {
-        record.put(FILTER_PRODUCT_ALIAS, new JSONArray(record.getString(FILTER_PRODUCT_ALIAS)));
-      }
-    }
+  public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
+    JSONObject recordJson = new JSONObject(rowMap);
+    recordJson.put(FILTER_BPCATEGORY_ALIAS,
+        new JSONArray((String) rowMap.get(FILTER_BPCATEGORY_ALIAS)));
+    recordJson.put(FILTER_BPARTNER_ALIAS,
+        new JSONArray((String) rowMap.get(FILTER_BPARTNER_ALIAS)));
+    recordJson.put(FILTER_PRODUCTCATEGORY_ALIAS,
+        new JSONArray((String) rowMap.get(FILTER_PRODUCTCATEGORY_ALIAS)));
+    recordJson.put(FILTER_PRODUCT_ALIAS, new JSONArray((String) rowMap.get(FILTER_PRODUCT_ALIAS)));
+    return recordJson;
   }
 
   @Override

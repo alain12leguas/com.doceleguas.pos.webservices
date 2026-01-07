@@ -1,5 +1,7 @@
 package com.doceleguas.pos.webservices;
 
+import java.util.Map;
+
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -93,14 +95,9 @@ public class OCBusinessPartner extends Model {
   }
 
   @Override
-  public void transformResult(JSONArray data) throws JSONException {
-
-    for (int i = 0; i < data.length(); i++) {
-      JSONObject record = data.getJSONObject(i);
-      if (record.optString("locations", null) != null) {
-        record.put("locations", new JSONArray(record.getString("locations")));
-      }
-
-    }
+  public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
+    JSONObject recordJson = new JSONObject(rowMap);
+    recordJson.put("locations", new JSONArray((String) rowMap.get("locations")));
+    return recordJson;
   }
 }
