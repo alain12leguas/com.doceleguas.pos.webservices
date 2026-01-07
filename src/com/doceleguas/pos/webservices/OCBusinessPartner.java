@@ -1,5 +1,6 @@
 package com.doceleguas.pos.webservices;
 
+import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.query.NativeQuery;
@@ -22,7 +23,8 @@ public class OCBusinessPartner extends Model {
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
     String lastId = jsonParams.optString("lastId", null);
-    String sql = "SELECT " + selectList + " " //
+    String sql = "SELECT " + selectList + ", " //
+        + locations() + " "//
         + " FROM  c_bpartner e"//
         + "       INNER JOIN m_pricelist pricingpri1_" //
         + "               ON e.m_pricelist_id = pricingpri1_.m_pricelist_id"//
@@ -69,4 +71,36 @@ public class OCBusinessPartner extends Model {
     return "BusinessPartner";
   }
 
+  private String locations() {
+    //@formatter:off
+    return " (SELECT CAST(json_agg("
+        + "     json_build_object("
+        + "         'id', c_bpartner_location_.c_bpartner_location_id,"
+        + "         'isShipTo', c_bpartner_location_.isshipto,"
+        + "         'isBillTo', c_bpartner_location_.isbillto,"
+        + "         'name', c_bpartner_location_.name,"
+        + "         'adressLine1', c_location_.address1,"         
+        + "         'adressLine2', c_location_.address2,"
+        + "         'regionName', c_location_.regionname,"
+        + "         'postalCode', c_location_.postal,"   
+        + "         'cityName', c_city_.name,"           
+        + "         '_identifier', COALESCE(c_location_.address1 || CASE WHEN c_location_.address2 IS NOT NULL THEN ' ' END || c_location_.address2, c_location_.address1, c_location_.address2, c_location_.postal, c_city_.name) )) AS TEXT)"
+        + "     FROM c_bpartner_location c_bpartner_location_ " 
+        + "       INNER JOIN c_location c_location_ ON c_location_.c_location_id=c_bpartner_location_.c_location_id"
+        + "       LEFT JOIN c_city c_city_ ON c_city_.c_city_id=c_location_.c_city_id"        
+        + "     WHERE c_bpartner_location_.c_bpartner_id=e.c_bpartner_id) AS locations";
+    //@formatter:on
+  }
+
+  @Override
+  public void transformResult(JSONArray data) throws JSONException {
+
+    for (int i = 0; i < data.length(); i++) {
+      JSONObject record = data.getJSONObject(i);
+      if (record.optString("locations", null) != null) {
+        record.put("locations", new JSONArray(record.getString("locations")));
+      }
+
+    }
+  }
 }
