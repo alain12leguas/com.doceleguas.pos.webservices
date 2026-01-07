@@ -8,6 +8,7 @@ import java.lang.annotation.Target;
 import javax.enterprise.util.AnnotationLiteral;
 import javax.inject.Qualifier;
 
+import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.query.NativeQuery;
@@ -19,6 +20,10 @@ public abstract class Model {
   // public abstract JSONArray exec(JSONObject jsonsent) throws JSONException;
 
   public abstract String getName();
+
+  public void transformResult(JSONArray dataArray) throws JSONException {
+
+  }
 
   @Qualifier
   @Retention(RetentionPolicy.RUNTIME)

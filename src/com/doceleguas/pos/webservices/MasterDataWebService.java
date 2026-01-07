@@ -90,6 +90,7 @@ public class MasterDataWebService implements WebService {
         } finally {
           scroll.close();
         }
+        model.transformResult(dataArray);
         responseJSON.put("data", dataArray);
         response.getWriter().write(responseJSON.toString());
       } else {
