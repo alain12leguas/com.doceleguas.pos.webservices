@@ -24,9 +24,8 @@ import org.openbravo.model.ad.access.Role;
 import org.openbravo.model.ad.access.User;
 import org.openbravo.model.ad.system.Language;
 import org.openbravo.retail.posterminal.POSDefaults;
-import org.openbravo.retail.posterminal.POSLoginHandler;
 
-public class Login extends POSLoginHandler {
+public class Login extends OCPOSLoginHandler {
   private static final long serialVersionUID = 1L;
 
   @Override
