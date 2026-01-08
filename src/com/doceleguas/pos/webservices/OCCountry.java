@@ -15,12 +15,14 @@ public class OCCountry extends Model {
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
     Long offset = jsonParams.optLong("offset", 0);
-    String sql = "SELECT " + selectList + " " //
+    String sql = "SELECT " + selectList + ", " //
+        + " e.isactive as \"isActive\" " //
         + " FROM c_country e " //
-        + "  WHERE e.isactive='Y' "//
         + "   AND      (e.ad_client_id IN :clients) ";//
     if (jsonParams.optString("lastUpdated", null) != null) {
       sql += " AND e.updated > :lastUpdated";
+    } else {
+      sql += "  AND e.IsActive='Y'";
     }
     sql += "  ORDER BY e.NAME ASC ";//
     sql += " LIMIT :limit ";

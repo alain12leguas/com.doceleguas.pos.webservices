@@ -23,7 +23,8 @@ public class OCProduct extends Model {
     String lastId = jsonParams.optString("lastId", null);
     String lastUpdated = jsonParams.optString("lastUpdated", null);
     String selectList = jsonParams.getString("selectList");
-    String sql = "SELECT DISTINCT " + selectList + " " //
+    String sql = "SELECT DISTINCT " + selectList + ", " //
+        + "e.isactive as \"isActive\" " //
         + " FROM  m_product e" //
         + "       LEFT OUTER JOIN ad_image adimage1_" //
         + "                    ON e.ad_image_id = adimage1_.ad_image_id" //
@@ -39,10 +40,11 @@ public class OCProduct extends Model {
         + " WHERE e.c_uom_id = c_uom_.c_uom_id" //
         + "       AND e.m_product_category_id = m_product_category_.m_product_category_id" //
         + "       AND m_productprice_.m_pricelist_version_id = :priceLisVersionId" //
-        + "       AND obretcopro_.obretco_productlist_id = :productListId" //
-        + "       AND e.isactive = 'Y'";
+        + "       AND obretcopro_.obretco_productlist_id = :productListId";
     if (lastUpdated != null) {
       sql += " AND e.updated > :lastUpdated";
+    } else {
+      sql += "  AND e.IsActive='Y'";
     }
     if (lastId != null) {
       sql += " AND e.m_product_id > :lastId";

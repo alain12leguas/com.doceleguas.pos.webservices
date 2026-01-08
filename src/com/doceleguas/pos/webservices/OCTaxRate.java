@@ -20,12 +20,12 @@ public class OCTaxRate extends Model {
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
     Long offset = jsonParams.optLong("offset", 0);
-    String sql = "SELECT " + selectList + " " //
+    String sql = "SELECT " + selectList + ", " //
+        + "e.isactive as \"isActive\" " //
         + " FROM C_Tax e" // "
         + " INNER JOIN C_TaxCategory financialm1_ ON e.C_TaxCategory_ID=financialm1_.C_TaxCategory_ID" // "
         + " WHERE (e.AD_Client_ID IN :clients)" // "
         + "  AND (e.AD_Org_ID IN :orgs)" //
-        + "  AND e.IsActive='Y'" //
         + "  AND (e.SOPOType IN ('S', 'B'))" //
         + "  AND (e.IsSummary='N'" //
         + "       OR financialm1_.Asbom='Y')" //
@@ -63,6 +63,8 @@ public class OCTaxRate extends Model {
         + "            AND (financialm8_.From_Region_ID IS NULL)))";//
     if (jsonParams.optString("lastUpdated", null) != null) {
       sql += " AND e.updated > :lastUpdated";
+    } else {
+      sql += " AND e.IsActive='Y'";
     }
     sql += " LIMIT :limit ";
     if (offset != 0) {

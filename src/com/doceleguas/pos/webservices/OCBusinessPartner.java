@@ -26,6 +26,7 @@ public class OCBusinessPartner extends Model {
     Long limit = jsonParams.optLong("limit", 1000);
     String lastId = jsonParams.optString("lastId", null);
     String sql = "SELECT " + selectList + ", " //
+        + " e.isactive as \"isActive\", " //
         + locations() + ", "//
         + contact() + " " //
         + " FROM  c_bpartner e"//
@@ -87,7 +88,8 @@ public class OCBusinessPartner extends Model {
         + "         'regionName', c_location_.regionname,"
         + "         'postalCode', c_location_.postal,"   
         + "         'cityName', c_city_.name,"           
-        + "         '_identifier', COALESCE(c_location_.address1 || CASE WHEN c_location_.address2 IS NOT NULL THEN ' ' END || c_location_.address2, c_location_.address1, c_location_.address2, c_location_.postal, c_city_.name) )) AS TEXT)"
+        + "         '_identifier', COALESCE(c_location_.address1 || CASE WHEN c_location_.address2 IS NOT NULL THEN ' ' END || c_location_.address2, c_location_.address1, c_location_.address2, c_location_.postal, c_city_.name) " 
+        + "     )) FILTER (WHERE c_bpartner_location_.isactive='Y') AS TEXT)"
         + "     FROM c_bpartner_location c_bpartner_location_ " 
         + "       INNER JOIN c_location c_location_ ON c_location_.c_location_id=c_bpartner_location_.c_location_id"
         + "       LEFT JOIN c_city c_city_ ON c_city_.c_city_id=c_location_.c_city_id" 
@@ -103,8 +105,7 @@ public class OCBusinessPartner extends Model {
         + "         'firstName', ad_user_.firstname,"
         + "         'lastName', ad_user_.lastname,"
         + "         'phone', ad_user_.phone,"
-        + "         'email', ad_user_.email,"         
-        + "         'active', ad_user_.isactive)) AS TEXT)"
+        + "         'email', ad_user_.email)) FILTER (WHERE ad_user_.isactive='Y') AS TEXT)"
         + "     FROM ad_user ad_user_ " 
         + "     WHERE ad_user_.c_bpartner_id=e.c_bpartner_id) AS contact";
     //@formatter:on
