@@ -18,7 +18,7 @@ public class OCCountry extends Model {
     String sql = "SELECT " + selectList + ", " //
         + " e.isactive as \"isActive\" " //
         + " FROM c_country e " //
-        + "   AND      (e.ad_client_id IN :clients) ";//
+        + "  WHERE (e.ad_client_id IN :clients) ";//
     if (jsonParams.optString("lastUpdated", null) != null) {
       sql += " AND e.updated > :lastUpdated";
     } else {
