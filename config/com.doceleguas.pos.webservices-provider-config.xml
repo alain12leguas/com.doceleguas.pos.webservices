@@ -15,4 +15,9 @@
         <class>com.doceleguas.pos.webservices.LoadTerminal</class>
         <singleton>true</singleton>
     </bean>    
+    <bean>
+        <name>SaveBusinessPartner</name>
+        <class>com.doceleguas.pos.webservices.SaveBusinessPartner</class>
+        <singleton>true</singleton>
+    </bean>  
 </provider>
