@@ -26,7 +26,8 @@ public class OCBusinessPartner extends Model {
     Long limit = jsonParams.optLong("limit", 1000);
     String lastId = jsonParams.optString("lastId", null);
     String sql = "SELECT " + selectList + ", " //
-        + locations() + " "//
+        + locations() + ", "//
+        + contact() + " " //
         + " FROM  c_bpartner e"//
         + "       INNER JOIN m_pricelist pricingpri1_" //
         + "               ON e.m_pricelist_id = pricingpri1_.m_pricelist_id"//
@@ -38,15 +39,15 @@ public class OCBusinessPartner extends Model {
         + "                    ON e.c_bpartner_id = aduserlist4_.c_bpartner_id"//
         + "       CROSS JOIN c_bp_group businesspa5_ "
         + " WHERE  e.c_bp_group_id = businesspa5_.c_bp_group_id" //
-        + " AND 1 = 1" //
         + " AND e.iscustomer = 'Y'" //
-        + " AND e.isactive = 'Y'"//
         + " AND ( e.ad_client_id IN :clients )"//
         + " AND ( e.ad_org_id IN :orgs )"//
         + " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
         + "     FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
     if (lastUpdated != null) {
       sql += " AND e.updated > :lastUpdated";
+    } else {
+      sql += "  AND e.IsActive='Y'";
     }
     if (lastId != null) {
       sql += " AND e.c_bpartner_id > :lastId";
@@ -89,8 +90,23 @@ public class OCBusinessPartner extends Model {
         + "         '_identifier', COALESCE(c_location_.address1 || CASE WHEN c_location_.address2 IS NOT NULL THEN ' ' END || c_location_.address2, c_location_.address1, c_location_.address2, c_location_.postal, c_city_.name) )) AS TEXT)"
         + "     FROM c_bpartner_location c_bpartner_location_ " 
         + "       INNER JOIN c_location c_location_ ON c_location_.c_location_id=c_bpartner_location_.c_location_id"
-        + "       LEFT JOIN c_city c_city_ ON c_city_.c_city_id=c_location_.c_city_id"        
+        + "       LEFT JOIN c_city c_city_ ON c_city_.c_city_id=c_location_.c_city_id" 
         + "     WHERE c_bpartner_location_.c_bpartner_id=e.c_bpartner_id) AS locations";
+    //@formatter:on
+  }
+
+  private String contact() {
+    //@formatter:off
+    return " (SELECT CAST(json_agg("
+        + "     json_build_object("
+        + "         'id', ad_user_.ad_user_id,"
+        + "         'firstName', ad_user_.firstname,"
+        + "         'lastName', ad_user_.lastname,"
+        + "         'phone', ad_user_.phone,"
+        + "         'email', ad_user_.email,"         
+        + "         'active', ad_user_.isactive)) AS TEXT)"
+        + "     FROM ad_user ad_user_ " 
+        + "     WHERE ad_user_.c_bpartner_id=e.c_bpartner_id) AS contact";
     //@formatter:on
   }
 
@@ -99,6 +115,9 @@ public class OCBusinessPartner extends Model {
     JSONObject recordJson = new JSONObject(rowMap);
     if (rowMap.get("locations") != null) {
       recordJson.put("locations", new JSONArray((String) rowMap.get("locations")));
+    }
+    if (rowMap.get("contact") != null) {
+      recordJson.put("contact", new JSONArray((String) rowMap.get("contact")));
     }
     return recordJson;
   }
