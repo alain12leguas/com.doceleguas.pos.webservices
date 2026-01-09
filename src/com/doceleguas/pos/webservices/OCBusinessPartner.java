@@ -83,16 +83,18 @@ public class OCBusinessPartner extends Model {
         + "         'isShipTo', c_bpartner_location_.isshipto,"
         + "         'isBillTo', c_bpartner_location_.isbillto,"
         + "         'name', c_bpartner_location_.name,"
+        + "         'locationId', c_location_.c_location_id,"
         + "         'adressLine1', c_location_.address1,"         
         + "         'adressLine2', c_location_.address2,"
-        + "         'regionName', c_location_.regionname,"
+        + "         'regionId', c_location_.c_region_id,"
         + "         'postalCode', c_location_.postal,"   
-        + "         'cityName', c_city_.name,"           
-        + "         '_identifier', COALESCE(c_location_.address1 || CASE WHEN c_location_.address2 IS NOT NULL THEN ' ' END || c_location_.address2, c_location_.address1, c_location_.address2, c_location_.postal, c_city_.name) " 
+        + "         'cityName', c_location_.city,"    
+        + "         'countryId', c_location_.c_country_id,"            
+        + "         '_identifier', COALESCE(c_location_.address1 || CASE WHEN c_location_.address2 IS NOT NULL THEN ' ' END || c_location_.address2, c_location_.address1, c_location_.address2, c_location_.postal, c_location_.city) " 
         + "     )) FILTER (WHERE c_bpartner_location_.isactive='Y') AS TEXT)"
         + "     FROM c_bpartner_location c_bpartner_location_ " 
         + "       INNER JOIN c_location c_location_ ON c_location_.c_location_id=c_bpartner_location_.c_location_id"
-        + "       LEFT JOIN c_city c_city_ ON c_city_.c_city_id=c_location_.c_city_id" 
+        //+ "       LEFT JOIN c_region c_region_ ON c_region_.c_region_id=c_location_.c_region_id" 
         + "     WHERE c_bpartner_location_.c_bpartner_id=e.c_bpartner_id) AS locations";
     //@formatter:on
   }
