@@ -40,7 +40,7 @@ public class SaveBusinessPartner implements WebService {
         sb.append(line);
       }
       final JSONObject bparnterJson = new JSONObject(sb.toString());
-      updateCustomerHeader(conn, bparnterJson);
+      // updateCustomerHeader(conn, bparnterJson);
       updateContactInfo(conn, bparnterJson);
       updateLocations(conn, bparnterJson);
       conn.commit();
@@ -78,13 +78,13 @@ public class SaveBusinessPartner implements WebService {
   private int updateContactInfo(Connection conn, JSONObject customer)
       throws JSONException, SQLException {
     JSONObject contactJson = customer.getJSONObject("contact");
-    String sql = "UPDATE AD_USER SET phone = ?, email = ? WHERE AD_USER_ID = ?";
+    String sql = "UPDATE AD_USER SET firstname = ?, lastname = ?, phone = ?, email = ? WHERE AD_USER_ID = ?";
     try (PreparedStatement ps = conn.prepareStatement(sql)) {
-      // ps.setString(1, contactJson.getString("firstName"));
-      // ps.setString(2, contactJson.getString("lastName"));
-      ps.setString(1, contactJson.getString("phone"));
-      ps.setString(2, contactJson.getString("email"));
-      ps.setString(3, contactJson.getString("id"));
+      ps.setString(1, contactJson.getString("firstName"));
+      ps.setString(2, contactJson.getString("lastName"));
+      ps.setString(3, contactJson.getString("phone"));
+      ps.setString(4, contactJson.getString("email"));
+      ps.setString(5, contactJson.getString("id"));
       return ps.executeUpdate();
     }
   }
@@ -98,24 +98,68 @@ public class SaveBusinessPartner implements WebService {
       JSONObject bpLocation = locations.getJSONObject(i);
       boolean isNew = bpLocation.optBoolean("isNew", false);
       if (isNew) {
-        sqlBpLocation = "INSERT INTO c_bpartner_location (isshipto, isbillto, name, c_bpartner_location_id) VALUES (?, ?, ?, ?, ?)";
-        sqlLocation = "INSERT INTO c_location (address1, address2, c_region_id, postal, city, c_location_id) VALUES (?, ?, ?, ?, ?)";
-      }
-      try (PreparedStatement psLocation = conn.prepareStatement(sqlLocation)) {
-        psLocation.setString(1, bpLocation.getString("adressLine1"));
-        psLocation.setString(2, bpLocation.getString("adressLine2"));
-        psLocation.setString(3, bpLocation.optString("regionId", null));
-        psLocation.setString(4, bpLocation.getString("postalCode"));
-        psLocation.setString(5, bpLocation.getString("cityName"));
-        psLocation.setString(6, bpLocation.getString("locationId"));
-        psLocation.executeUpdate();
-      }
-      try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
-        psBpLocation.setString(1, bpLocation.optBoolean("isshipto") ? "Y" : "N");
-        psBpLocation.setString(2, bpLocation.optBoolean("isbillto") ? "Y" : "N");
-        psBpLocation.setString(3, bpLocation.getString("name"));
-        psBpLocation.setString(4, bpLocation.getString("id"));
-        psBpLocation.executeUpdate();
+      //@formatter:off
+        sqlLocation = "INSERT INTO c_location ("
+            + "    ad_client_id,"
+            + "    ad_org_id,"
+            + "    address1,"
+            + "    address2,"
+            + "    c_country_id,"
+            + "    c_region_id,"
+            + "    postal,"
+            + "    city,"
+            + "    c_location_id, createdby, updatedby, created, updated"
+            + " ) SELECT ad_client_id, ad_org_id, ?, ?, ?, ?, ?, ?, ?, '100','100', NOW(), NOW() FROM c_bpartner WHERE c_bpartner_id = ?;";
+                
+        sqlBpLocation = "INSERT INTO c_bpartner_location ("
+            + "    ad_client_id,"
+            + "    ad_org_id,"
+            + "    isshipto,"
+            + "    isbillto,"
+            + "    name,"
+            + "    c_bpartner_location_id,"
+            + "    c_location_id, createdby, updatedby, created, updated,"
+            + "    c_bpartner_id"
+            + " )"
+            + " SELECT ad_client_id, ad_org_id, ?, ?, ?, ?, ?, '100','100', NOW(), NOW(), c_bpartner_id FROM c_bpartner WHERE c_bpartner_id = ?;";
+      //@formatter:on
+        try (PreparedStatement psLocation = conn.prepareStatement(sqlLocation)) {
+          psLocation.setString(1, bpLocation.getString("adressLine1"));
+          psLocation.setString(2, bpLocation.getString("adressLine2"));
+          psLocation.setString(3, bpLocation.getString("countryId"));
+          psLocation.setString(4, bpLocation.optString("regionId", null));
+          psLocation.setString(5, bpLocation.getString("postalCode"));
+          psLocation.setString(6, bpLocation.getString("cityName"));
+          psLocation.setString(7, bpLocation.getString("locationId"));
+          psLocation.setString(8, customer.getString("id"));
+          psLocation.executeUpdate();
+        }
+        try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
+          psBpLocation.setString(1, bpLocation.optBoolean("isshipto") ? "Y" : "N");
+          psBpLocation.setString(2, bpLocation.optBoolean("isbillto") ? "Y" : "N");
+          psBpLocation.setString(3, bpLocation.getString("name"));
+          psBpLocation.setString(4, bpLocation.getString("id"));
+          psBpLocation.setString(5, bpLocation.getString("locationId"));
+          psBpLocation.setString(6, customer.getString("id"));
+          psBpLocation.executeUpdate();
+        }
+      } else {
+        try (PreparedStatement psLocation = conn.prepareStatement(sqlLocation)) {
+          psLocation.setString(1, bpLocation.getString("adressLine1"));
+          psLocation.setString(2, bpLocation.getString("adressLine2"));
+          psLocation.setString(3, bpLocation.optString("regionId", null));
+          psLocation.setString(4, bpLocation.getString("postalCode"));
+          psLocation.setString(5, bpLocation.getString("cityName"));
+          psLocation.setString(6, bpLocation.getString("locationId"));
+          psLocation.executeUpdate();
+        }
+        try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
+          psBpLocation.setString(1, bpLocation.optBoolean("isshipto") ? "Y" : "N");
+          psBpLocation.setString(2, bpLocation.optBoolean("isbillto") ? "Y" : "N");
+          psBpLocation.setString(3, bpLocation.getString("name"));
+          psBpLocation.setString(4, bpLocation.getString("id"));
+          psBpLocation.executeUpdate();
+        }
       }
     }
   }
