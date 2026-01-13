@@ -136,8 +136,8 @@ public class SaveBusinessPartner implements WebService {
           int a = r;
         }
         try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
-          psBpLocation.setString(1, bpLocation.optBoolean("isshipto") ? "Y" : "N");
-          psBpLocation.setString(2, bpLocation.optBoolean("isbillto") ? "Y" : "N");
+          psBpLocation.setString(1, bpLocation.optBoolean("isShipTo") ? "Y" : "N");
+          psBpLocation.setString(2, bpLocation.optBoolean("isBillTo") ? "Y" : "N");
           psBpLocation.setString(3, bpLocation.getString("name"));
           psBpLocation.setString(4, bpLocation.getString("id"));
           psBpLocation.setString(5, bpLocation.getString("locationId"));
@@ -155,8 +155,8 @@ public class SaveBusinessPartner implements WebService {
           psLocation.setString(7, bpLocation.getString("locationId"));
         }
         try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
-          psBpLocation.setString(1, bpLocation.optBoolean("isshipto") ? "Y" : "N");
-          psBpLocation.setString(2, bpLocation.optBoolean("isbillto") ? "Y" : "N");
+          psBpLocation.setString(1, bpLocation.optBoolean("isShipTo") ? "Y" : "N");
+          psBpLocation.setString(2, bpLocation.optBoolean("isBillTo") ? "Y" : "N");
           psBpLocation.setString(3, bpLocation.getString("name"));
           psBpLocation.setString(4, bpLocation.getString("id"));
           psBpLocation.executeUpdate();
