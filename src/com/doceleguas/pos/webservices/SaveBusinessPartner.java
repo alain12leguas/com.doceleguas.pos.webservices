@@ -153,6 +153,7 @@ public class SaveBusinessPartner implements WebService {
           psLocation.setString(5, bpLocation.getString("postalCode"));
           psLocation.setString(6, bpLocation.getString("cityName"));
           psLocation.setString(7, bpLocation.getString("locationId"));
+          psLocation.executeUpdate();
         }
         try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
           psBpLocation.setString(1, bpLocation.optBoolean("isShipTo") ? "Y" : "N");
