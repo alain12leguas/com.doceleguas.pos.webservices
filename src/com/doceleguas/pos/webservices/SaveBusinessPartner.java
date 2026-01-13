@@ -4,8 +4,12 @@ import java.io.BufferedReader;
 import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -40,9 +44,10 @@ public class SaveBusinessPartner implements WebService {
         sb.append(line);
       }
       final JSONObject bparnterJson = new JSONObject(sb.toString());
-      // updateCustomerHeader(conn, bparnterJson);
+      updateCustomerHeader(conn, bparnterJson);
       updateContactInfo(conn, bparnterJson);
       updateLocations(conn, bparnterJson);
+      deleteLocations(conn, bparnterJson);
       conn.commit();
       JSONObject successResponse = new JSONObject();
       successResponse.put("status", "success");
@@ -62,6 +67,25 @@ public class SaveBusinessPartner implements WebService {
       out.flush();
     } finally {
       conn.setAutoCommit(true);
+    }
+  }
+
+  private void deleteLocations(Connection conn, JSONObject bparnterJson)
+      throws SQLException, JSONException {
+    JSONArray locations = bparnterJson.getJSONArray("locations");
+    List<String> ids = new ArrayList<>();
+    for (int i = 0; i < locations.length(); i++) {
+      ids.add(locations.getJSONObject(i).getString("id"));
+    }
+    String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
+    String sql = "DELETE FROM c_bpartner_location WHERE c_bpartner_location_id NOT IN ("
+        + placeholders + ") AND c_bpartner_id = ?";
+    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+      for (int i = 0; i < ids.size(); i++) {
+        ps.setString(i + 1, ids.get(i));
+      }
+      ps.setString(ids.size() + 1, bparnterJson.getString("id"));
+      ps.executeUpdate();
     }
   }
 
@@ -96,7 +120,7 @@ public class SaveBusinessPartner implements WebService {
     String sqlBpLocation = "UPDATE c_bpartner_location SET isshipto = ?, isbillto = ?, name = ? WHERE c_bpartner_location_id = ?";
     for (int i = 0; i < locations.length(); i++) {
       JSONObject bpLocation = locations.getJSONObject(i);
-      boolean isNew = bpLocation.optBoolean("isNew", false);
+      boolean isNew = !existRecord(conn, "c_bpartner_location", bpLocation.getString("id"));
       if (isNew) {
       //@formatter:off
         sqlLocation = "INSERT INTO c_location ("
@@ -132,8 +156,7 @@ public class SaveBusinessPartner implements WebService {
           psLocation.setString(6, bpLocation.getString("cityName"));
           psLocation.setString(7, bpLocation.getString("locationId"));
           psLocation.setString(8, customer.getString("id"));
-          int r = psLocation.executeUpdate();
-          int a = r;
+          psLocation.executeUpdate();
         }
         try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
           psBpLocation.setString(1, bpLocation.optBoolean("isShipTo") ? "Y" : "N");
@@ -162,6 +185,16 @@ public class SaveBusinessPartner implements WebService {
           psBpLocation.setString(4, bpLocation.getString("id"));
           psBpLocation.executeUpdate();
         }
+      }
+    }
+  }
+
+  private boolean existRecord(Connection conn, String table, String value) throws SQLException {
+    String query = String.format("SELECT 1 FROM %s WHERE %s_id = ?", table, table);
+    try (PreparedStatement ps = conn.prepareStatement(query)) {
+      ps.setString(1, value);
+      try (ResultSet rs = ps.executeQuery()) {
+        return rs.next();
       }
     }
   }

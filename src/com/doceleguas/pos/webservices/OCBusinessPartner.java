@@ -120,7 +120,12 @@ public class OCBusinessPartner extends Model {
       recordJson.put("locations", new JSONArray((String) rowMap.get("locations")));
     }
     if (rowMap.get("contact") != null) {
-      recordJson.put("contact", new JSONArray((String) rowMap.get("contact")));
+      JSONArray contacts = new JSONArray((String) rowMap.get("contact"));
+      if (contacts.length() > 0) {
+        recordJson.put("contact", contacts.getJSONObject(0));
+      } else {
+        recordJson.put("contact", new JSONObject());
+      }
     }
     return recordJson;
   }
