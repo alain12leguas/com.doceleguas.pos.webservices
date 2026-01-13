@@ -93,7 +93,7 @@ public class SaveBusinessPartner implements WebService {
       throws JSONException, SQLException {
     JSONArray locations = customer.getJSONArray("locations");
     String sqlBpLocation = "UPDATE c_bpartner_location SET isshipto = ?, isbillto = ?, name = ? WHERE c_bpartner_location_id = ?";
-    String sqlLocation = "UPDATE c_location SET address1 = ?, address2 = ?, c_region_id = ?, postal = ?, city = ? WHERE c_location_id = ?";
+    String sqlLocation = "UPDATE c_location SET address1 = ?, address2 = ?, c_country_id = ?, c_region_id = ?, postal = ?, city = ? WHERE c_location_id = ?";
     for (int i = 0; i < locations.length(); i++) {
       JSONObject bpLocation = locations.getJSONObject(i);
       boolean isNew = bpLocation.optBoolean("isNew", false);
@@ -131,7 +131,7 @@ public class SaveBusinessPartner implements WebService {
           psLocation.setString(5, bpLocation.getString("postalCode"));
           psLocation.setString(6, bpLocation.getString("cityName"));
           psLocation.setString(7, bpLocation.getString("locationId"));
-          psLocation.setString(8, customer.getString("id"));
+          psLocation.setString(8, bpLocation.getString("id"));
           psLocation.executeUpdate();
         }
         try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
@@ -147,10 +147,11 @@ public class SaveBusinessPartner implements WebService {
         try (PreparedStatement psLocation = conn.prepareStatement(sqlLocation)) {
           psLocation.setString(1, bpLocation.getString("adressLine1"));
           psLocation.setString(2, bpLocation.getString("adressLine2"));
-          psLocation.setString(3, bpLocation.optString("regionId", null));
-          psLocation.setString(4, bpLocation.getString("postalCode"));
-          psLocation.setString(5, bpLocation.getString("cityName"));
-          psLocation.setString(6, bpLocation.getString("locationId"));
+          psLocation.setString(3, bpLocation.optString("countryId"));
+          psLocation.setString(4, bpLocation.optString("regionId"));
+          psLocation.setString(5, bpLocation.getString("postalCode"));
+          psLocation.setString(6, bpLocation.getString("cityName"));
+          psLocation.setString(7, bpLocation.getString("locationId"));
           psLocation.executeUpdate();
         }
         try (PreparedStatement psBpLocation = conn.prepareStatement(sqlBpLocation)) {
