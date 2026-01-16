@@ -23,6 +23,7 @@ public class OCTaxZone extends Model {
     String sql = "SELECT " + selectList + ", " //
         + "e.isactive as \"isActive\" " //
         + " FROM C_Tax_Zone e" //
+        + "       INNER JOIN C_Tax c_tax_ on e.C_Tax_ID=c_tax_.C_Tax_ID" //
         + " WHERE (e.AD_Client_ID IN :clients)" //
         + "  AND (e.AD_Org_ID IN :orgs)" //
         + "  AND (e.C_Tax_ID IN " //
