@@ -70,22 +70,30 @@ public class SaveBusinessPartner implements WebService {
     }
   }
 
-  private void deleteLocations(Connection conn, JSONObject bparnterJson)
-      throws SQLException, JSONException {
-    JSONArray locations = bparnterJson.getJSONArray("locations");
-    List<String> ids = new ArrayList<>();
-    for (int i = 0; i < locations.length(); i++) {
-      ids.add(locations.getJSONObject(i).getString("id"));
-    }
-    String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
-    String sql = "DELETE FROM c_bpartner_location WHERE c_bpartner_location_id NOT IN ("
-        + placeholders + ") AND c_bpartner_id = ?";
-    try (PreparedStatement ps = conn.prepareStatement(sql)) {
-      for (int i = 0; i < ids.size(); i++) {
-        ps.setString(i + 1, ids.get(i));
+  private void deleteLocations(Connection conn, JSONObject bparnterJson) throws Exception {
+    try {
+      JSONArray locations = bparnterJson.getJSONArray("locations");
+      List<String> ids = new ArrayList<>();
+      for (int i = 0; i < locations.length(); i++) {
+        ids.add(locations.getJSONObject(i).getString("id"));
       }
-      ps.setString(ids.size() + 1, bparnterJson.getString("id"));
-      ps.executeUpdate();
+      String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
+      String sql = "DELETE FROM c_bpartner_location WHERE c_bpartner_location_id NOT IN ("
+          + placeholders + ") AND c_bpartner_id = ?";
+      try (PreparedStatement ps = conn.prepareStatement(sql)) {
+        for (int i = 0; i < ids.size(); i++) {
+          ps.setString(i + 1, ids.get(i));
+        }
+        ps.setString(ids.size() + 1, bparnterJson.getString("id"));
+        ps.executeUpdate();
+      }
+    } catch (SQLException e) {
+      log.error(e.getMessage(), e);
+      throw new Exception(
+          "LOC_ERROR:Cannot delete locations because they are being used in other records.");
+    } catch (JSONException e) {
+      log.error(e.getMessage(), e);
+      throw new Exception(e);
     }
   }
 
