@@ -72,14 +72,20 @@ public class SaveBusinessPartner implements WebService {
 
   private void deleteLocations(Connection conn, JSONObject bparnterJson) throws Exception {
     try {
-      JSONArray locations = bparnterJson.getJSONArray("locations");
-      List<String> ids = new ArrayList<>();
-      for (int i = 0; i < locations.length(); i++) {
-        ids.add(locations.getJSONObject(i).getString("id"));
+      JSONArray deletedIds = bparnterJson.getJSONArray("deletedLocationIds");
+      if (deletedIds.length() == 0) {
+        return;
       }
+      List<String> ids = new ArrayList<>();
+      for (int i = 0; i < deletedIds.length(); i++) {
+        ids.add(deletedIds.getString(i));
+      }
+
       String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
-      String sql = "DELETE FROM c_bpartner_location WHERE c_bpartner_location_id NOT IN ("
+
+      String sql = "DELETE FROM c_bpartner_location WHERE c_bpartner_location_id IN ("
           + placeholders + ") AND c_bpartner_id = ?";
+
       try (PreparedStatement ps = conn.prepareStatement(sql)) {
         for (int i = 0; i < ids.size(); i++) {
           ps.setString(i + 1, ids.get(i));
