@@ -84,13 +84,12 @@ public class SaveBusinessPartner implements WebService {
       String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
 
       String sql = "DELETE FROM c_bpartner_location WHERE c_bpartner_location_id IN ("
-          + placeholders + ") AND c_bpartner_id = ?";
+          + placeholders + ")";
 
       try (PreparedStatement ps = conn.prepareStatement(sql)) {
         for (int i = 0; i < ids.size(); i++) {
           ps.setString(i + 1, ids.get(i));
         }
-        ps.setString(ids.size() + 1, bparnterJson.getString("id"));
         ps.executeUpdate();
       }
     } catch (SQLException e) {
