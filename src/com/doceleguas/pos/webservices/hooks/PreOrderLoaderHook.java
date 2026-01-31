@@ -1,5 +1,7 @@
 package com.doceleguas.pos.webservices.hooks;
 
+import java.util.Iterator;
+
 import javax.enterprise.context.ApplicationScoped;
 
 import org.apache.logging.log4j.LogManager;
@@ -16,9 +18,11 @@ public class PreOrderLoaderHook implements OrderLoaderPreProcessHook {
   @Override
   public void exec(JSONObject jsonOrder) {
     try {
+      jsonOrder.put("generateExternalInvoice", false);
       if (jsonOrder.optBoolean("ocreIssueInvoice", false)) {
         JSONObject calculatedInvoice = cloneJSON(jsonOrder);
-        calculatedInvoice.put("documentNo", jsonOrder.getString("invoiceDocumentNo"));
+        JSONObject invoiceInfo = jsonOrder.getJSONObject("calculatedInvoiceInfo");
+        copyProperties(invoiceInfo, calculatedInvoice);
         jsonOrder.put("calculatedInvoice", calculatedInvoice);
       }
     } catch (Exception e) {
@@ -36,6 +40,20 @@ public class PreOrderLoaderHook implements OrderLoaderPreProcessHook {
     } catch (JSONException e) {
       // This should not happen with a valid original JSONObject
       return new JSONObject();
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  public void copyProperties(JSONObject origin, JSONObject target) {
+    try {
+      Iterator<String> keys = origin.keys();
+      while (keys.hasNext()) {
+        String key = keys.next();
+        Object value = origin.get(key);
+        target.put(key, value);
+      }
+    } catch (Exception e) {
+      log.debug("Error cloning json properties: " + e.getMessage());
     }
   }
 }
