@@ -19,5 +19,10 @@
         <name>SaveBusinessPartner</name>
         <class>com.doceleguas.pos.webservices.SaveBusinessPartner</class>
         <singleton>true</singleton>
-    </bean>  
+    </bean>
+    <bean>
+        <name>GetOrders</name>
+        <class>com.doceleguas.pos.webservices.GetOrders</class>
+        <singleton>true</singleton>
+    </bean>
 </provider>
