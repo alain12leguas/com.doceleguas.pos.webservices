@@ -1,12 +1,16 @@
 package com.doceleguas.pos.webservices;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.stream.Collectors;
 
-import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -23,15 +27,18 @@ import org.openbravo.service.web.WebService;
  * This endpoint acts as a proxy to the org.openbravo.api.ExportService/Order endpoint, providing a
  * simplified interface for querying orders with different filter types.
  * 
- * The authentication is handled by the Openbravo framework before reaching this WebService, so the
- * user context (OBContext) is already established. This service uses RequestDispatcher to forward
- * the request internally to the ExportService, maintaining the same authentication context.
+ * The authentication is handled by forwarding the Authorization header from the incoming request
+ * to the ExportService. This ensures that the same credentials used to call this endpoint are
+ * used to authenticate with the underlying ExportService.
  */
 public class GetOrders implements WebService {
 
   private static final Logger log = LogManager.getLogger();
 
-  private static final String EXPORT_SERVICE_BASE_PATH = "/ws/org.openbravo.api.ExportService/Order";
+  private static final String EXPORT_SERVICE_PATH = "/ws/org.openbravo.api.ExportService/Order";
+  private static final String AUTHORIZATION_HEADER = "Authorization";
+  private static final int CONNECTION_TIMEOUT = 30000;
+  private static final int READ_TIMEOUT = 60000;
 
   // Filter type constants
   private static final String FILTER_BY_ID = "byId";
@@ -47,6 +54,14 @@ public class GetOrders implements WebService {
     response.setCharacterEncoding("UTF-8");
 
     try {
+      // Get and validate the Authorization header
+      String authHeader = request.getHeader(AUTHORIZATION_HEADER);
+      if (authHeader == null || authHeader.isEmpty()) {
+        sendErrorResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
+            "Missing Authorization header. Use Basic Auth.");
+        return;
+      }
+
       String filterType = request.getParameter("filter");
 
       if (filterType == null || filterType.isEmpty()) {
@@ -55,16 +70,19 @@ public class GetOrders implements WebService {
         return;
       }
 
-      String exportServicePath = buildExportServicePath(request, filterType);
+      String exportServiceRelativePath = buildExportServicePath(request, filterType);
 
-      if (exportServicePath == null) {
-        // Error already sent in buildExportServicePath
+      if (exportServiceRelativePath == null) {
         return;
       }
 
-      // Forward the request internally to the Export Service
-      // The authentication context (OBContext) is already established by the framework
-      forwardToExportService(request, response, exportServicePath);
+      // Build full URL for the ExportService
+      String fullUrl = buildFullUrl(request, exportServiceRelativePath);
+      
+      log.debug("Calling ExportService: {}", fullUrl);
+
+      // Call the ExportService and stream the response
+      callExportService(fullUrl, authHeader, response);
 
     } catch (MissingParameterException e) {
       sendErrorResponse(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
@@ -76,35 +94,76 @@ public class GetOrders implements WebService {
   }
 
   /**
-   * Forwards the request internally to the Export Service using RequestDispatcher.
-   * 
-   * This method uses the include() method instead of forward() to allow capturing the response. The
-   * authentication context is preserved because this is an internal forward within the same
-   * request.
-   * 
-   * @param request
-   *          The original HTTP request
-   * @param response
-   *          The HTTP response
-   * @param exportServicePath
-   *          The path to the Export Service endpoint
-   * @throws Exception
-   *           if the forward fails
+   * Builds the full URL for the ExportService based on the current request.
    */
-  private void forwardToExportService(HttpServletRequest request, HttpServletResponse response,
-      String exportServicePath) throws Exception {
-
-    log.debug("Forwarding to Export Service: {}", exportServicePath);
-
-    RequestDispatcher dispatcher = request.getRequestDispatcher(exportServicePath);
-
-    if (dispatcher == null) {
-      throw new Exception("Could not get RequestDispatcher for path: " + exportServicePath);
+  private String buildFullUrl(HttpServletRequest request, String relativePath) {
+    StringBuilder urlBuilder = new StringBuilder();
+    urlBuilder.append(request.getScheme())
+        .append("://")
+        .append(request.getServerName());
+    
+    int port = request.getServerPort();
+    if ((request.getScheme().equals("http") && port != 80) ||
+        (request.getScheme().equals("https") && port != 443)) {
+      urlBuilder.append(":").append(port);
     }
+    
+    urlBuilder.append(request.getContextPath())
+        .append(relativePath);
+    
+    return urlBuilder.toString();
+  }
 
-    // Use include() to forward the request and include the response from the target servlet
-    // The response from ExportService will be written directly to the response output stream
-    dispatcher.include(request, response);
+  /**
+   * Calls the ExportService using HttpURLConnection and streams the response back.
+   * The Authorization header from the original request is forwarded to maintain authentication.
+   */
+  private void callExportService(String url, String authHeader, HttpServletResponse response)
+      throws IOException {
+    
+    HttpURLConnection connection = null;
+    
+    try {
+      URL exportUrl = new URL(url);
+      connection = (HttpURLConnection) exportUrl.openConnection();
+      connection.setRequestMethod("GET");
+      connection.setRequestProperty(AUTHORIZATION_HEADER, authHeader);
+      connection.setRequestProperty("Accept", "application/json");
+      connection.setConnectTimeout(CONNECTION_TIMEOUT);
+      connection.setReadTimeout(READ_TIMEOUT);
+      connection.setDoInput(true);
+
+      int responseCode = connection.getResponseCode();
+      response.setStatus(responseCode);
+
+      // Read the response (either from input stream or error stream)
+      String responseBody;
+      if (responseCode >= 200 && responseCode < 300) {
+        try (BufferedReader reader = new BufferedReader(
+            new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+          responseBody = reader.lines().collect(Collectors.joining("\n"));
+        }
+      } else {
+        try (BufferedReader reader = new BufferedReader(
+            new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+          responseBody = reader.lines().collect(Collectors.joining("\n"));
+        }
+      }
+
+      // Copy relevant headers from ExportService response
+      String contentType = connection.getContentType();
+      if (contentType != null) {
+        response.setContentType(contentType);
+      }
+
+      // Write the response body
+      response.getWriter().write(responseBody);
+
+    } finally {
+      if (connection != null) {
+        connection.disconnect();
+      }
+    }
   }
 
   /**
@@ -114,14 +173,14 @@ public class GetOrders implements WebService {
    *          The HTTP request
    * @param filterType
    *          The type of filter to apply
-   * @return The path to call the Export Service (relative to context root)
+   * @return The relative path to call the Export Service
    * @throws MissingParameterException
    *           if required parameters are missing
    */
   private String buildExportServicePath(HttpServletRequest request, String filterType)
       throws MissingParameterException, UnsupportedEncodingException {
 
-    StringBuilder pathBuilder = new StringBuilder(EXPORT_SERVICE_BASE_PATH);
+    StringBuilder pathBuilder = new StringBuilder(EXPORT_SERVICE_PATH);
 
     switch (filterType) {
       case FILTER_BY_ID:
