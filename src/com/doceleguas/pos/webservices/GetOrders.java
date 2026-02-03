@@ -9,7 +9,6 @@ package com.doceleguas.pos.webservices;
 import java.io.IOException;
 import java.io.StringWriter;
 
-import javax.enterprise.inject.spi.CDI;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -18,6 +17,7 @@ import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.retail.posterminal.PaidReceiptsFilter;
 import org.openbravo.service.web.WebService;
@@ -61,8 +61,9 @@ public class GetOrders implements WebService {
       
       log.debug("GetOrders request: {}", jsonRequest.toString());
 
-      // Get the filter instance via CDI and execute
-      PaidReceiptsFilter filter = CDI.current().select(PaidReceiptsFilter.class).get();
+      // Get the filter instance via WeldUtils and execute
+      PaidReceiptsFilter filter = WeldUtils
+          .getInstanceFromStaticBeanManager(PaidReceiptsFilter.class);
       StringWriter writer = new StringWriter();
       filter.exec(writer, jsonRequest);
       
