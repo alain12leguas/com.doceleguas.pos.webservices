@@ -36,7 +36,7 @@ Este módulo implementa una serie de **Web Services personalizados** para extend
 │  ├──────────────────────────────────────────────────────────────────────┤   │
 │  │  MasterDataWebService    │ GetMasterDataModelsWebService            │   │
 │  │  LoadTerminal            │ SaveBusinessPartner                      │   │
-│  │  Login                   │                                          │   │
+│  │  Login                   │ GetOrders                                │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
@@ -338,6 +338,11 @@ Content-Type: application/json
 1. Extiende `OCPOSLoginHandler` para heredar la lógica base de autenticación
 2. Envuelve la respuesta original usando `ResponseBufferWrapper`
 3. Añade información adicional al response:
+   - Información del usuario
+   - Rol por defecto
+   - Lista de roles disponibles
+   - Idioma por defecto
+   - Lista de idiomas disponibles
 
 ---
 
@@ -345,7 +350,25 @@ Content-Type: application/json
 
 **Archivo:** `GetOrders.java`
 
-**Propósito:** Consultar órdenes del backend utilizando el servicio `org.openbravo.api.ExportService/Order` como proxy.
+**Propósito:** Consultar órdenes del sistema POS reutilizando directamente `PaidReceiptsFilter`.
+
+#### Arquitectura
+
+```
+┌──────────────┐     ┌─────────────┐     ┌─────────────────────────┐
+│   Cliente    │────▶│  GetOrders  │────▶│   PaidReceiptsFilter    │
+│   (GET)      │     │  WebService │     │   (CDI injection)       │
+└──────────────┘     └─────────────┘     └─────────────────────────┘
+       │                    │                        │
+       │  Query params      │  JSON (remoteFilters)  │  HQL Query
+       │  ?pos=...          │                        │
+       │  &documentNo=...   │───────────────────────▶│──────────────▶ DB
+       │                    │                        │
+       │  JSON response     │  Query result          │
+       │◀───────────────────│◀───────────────────────│
+```
+
+El webservice traduce los query parameters HTTP al formato JSON que espera `PaidReceiptsFilter`.
 
 #### Endpoint
 
@@ -353,153 +376,68 @@ Content-Type: application/json
 GET /ws/com.doceleguas.pos.webservices.GetOrders
 ```
 
-#### Parámetros de Entrada
+#### Parámetros
 
-| Parámetro | Tipo | Obligatorio | Descripción |
-|-----------|------|-------------|-------------|
-| `filter` | String | Sí | Tipo de filtro a aplicar (ver tipos disponibles abajo) |
+| Parámetro | Tipo | Requerido | Descripción |
+|-----------|------|-----------|-------------|
+| `pos` | String | **Sí** | ID del terminal POS |
+| `documentNo` | String | No | Número de documento (contains) |
+| `businessPartner` | String | No | ID del cliente (equals) |
+| `orderDateFrom` | String | No | Fecha desde (yyyy-MM-dd) |
+| `orderDateTo` | String | No | Fecha hasta (yyyy-MM-dd) |
+| `totalamountFrom` | String | No | Monto mínimo |
+| `totalamountTo` | String | No | Monto máximo |
+| `orderType` | String | No | Tipo: ORD, RET, LAY, verifiedReturns, payOpenTickets |
+| `store` | String | No | ID de tienda (cross-store) |
+| `limit` | Integer | No | Límite de resultados (default: 50) |
+| `offset` | Integer | No | Offset de paginación (default: 0) |
+| `orderBy` | String | No | Ordenamiento (default: "creationDate desc, documentNo desc") |
 
-#### Tipos de Filtro Disponibles
+#### Ejemplos
 
-##### 1. `byId` - Filtrar por ID de Orden
-
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `id` | Sí | UUID de la orden |
-
-**Ejemplo:**
 ```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byId&id=068DCCBCB90F80C459DD7BA46E32C16B
+# Buscar por número de documento
+GET /ws/com.doceleguas.pos.webservices.GetOrders?pos=1C9CB231...&documentNo=VBS
+
+# Buscar por rango de fechas
+GET /ws/com.doceleguas.pos.webservices.GetOrders?pos=1C9CB231...&orderDateFrom=2026-01-01&orderDateTo=2026-01-31
+
+# Solo devoluciones con paginación
+GET /ws/com.doceleguas.pos.webservices.GetOrders?pos=1C9CB231...&orderType=RET&limit=20&offset=0
 ```
 
-**Internamente invoca:**
-```
-/ws/org.openbravo.api.ExportService/Order/068DCCBCB90F80C459DD7BA46E32C16B
-```
+#### JSON Generado Internamente
 
----
-
-##### 2. `byDocumentNo` - Filtrar por Número de Documento
-
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `documentNo` | Sí | Número de documento de la orden |
-
-**Ejemplo:**
-```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byDocumentNo&documentNo=AUTBE0504P99-0000039
+```json
+{
+  "client": "39363B0921BB4293B48383844325E84C",
+  "organization": "D270A5AC50874F8BA67A88EE977F8E3B",
+  "pos": "1C9CB2318D17467BA0A76DB6CF309213",
+  "remoteFilters": [
+    {"columns": ["documentNo"], "value": "VBS", "operator": "contains", "isId": false}
+  ],
+  "orderByClause": "creationDate desc, documentNo desc",
+  "_limit": 50,
+  "_offset": 0
+}
 ```
 
-**Internamente invoca:**
-```
-/ws/org.openbravo.api.ExportService/Order/byDocumentNo?documentNo=AUTBE0504P99-0000039
-```
-
----
-
-##### 3. `byOrgOrderDate` - Filtrar por Organización y Fecha
-
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `organization` | Sí | Nombre o ID de la organización |
-| `orderDate` | Sí | Fecha de la orden (formato: YYYY-MM-DD) |
-
-**Ejemplo:**
-```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDate&organization=AUTO%205%20BIERGES&orderDate=2025-11-17
-```
-
-**Internamente invoca:**
-```
-/ws/org.openbravo.api.ExportService/Order/byOrgOrderDate?organization=AUTO%205%20BIERGES&orderDate=2025-11-17
-```
-
----
-
-##### 4. `byOrgOrderDateRange` - Filtrar por Organización y Rango de Fechas
-
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `organization` | Sí | Nombre o ID de la organización |
-| `dateFrom` | Sí | Fecha inicial del rango (formato: YYYY-MM-DD) |
-| `dateTo` | Sí | Fecha final del rango (formato: YYYY-MM-DD) |
-
-**Ejemplo:**
-```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDateRange&organization=AUTO%205%20BIERGES&dateFrom=2025-11-01&dateTo=2025-11-30
-```
-
-**Internamente invoca:**
-```
-/ws/org.openbravo.api.ExportService/Order/byOrgOrderDateRange?organization=AUTO%205%20BIERGES&dateFrom=2025-11-01&dateTo=2025-11-30
-```
-
----
-
-#### Respuesta Exitosa
-
-La respuesta es un relay directo del `ExportService/Order`:
+#### Respuesta
 
 ```json
 {
   "data": [
     {
       "id": "AC2661DED5E1EEA353FD72885A7EA1AC",
-      "client": "Mobivia",
-      "organization": "AUTO 5 BIERGES",
-      "organization_info": {
-        "name": "AUTO 5 BIERGES",
-        "searchKey": "0504",
-        "id": "610BDE28B0AF4D4685FC9B475B635591"
-      },
-      "orderDate": "2025-11-17",
-      "terminal": "0504099",
-      "documentNo": "AUTBE0504P99-0000039",
-      "documentType": "POS Order 0504",
-      "priceList": "Tarif Ventes AUTO 5 BIERGES 0504",
-      "businessPartner": "AUBE1000136",
-      "shipmentAddress": {
-        "address": "2 RUE DU PONT NEUF",
-        "city": "LILLE",
-        "zipCode": "59800",
-        "country": "RU",
-        "name": "2 RUE DU PONT NEUF ",
-        "shippingAddress": true,
-        "invoiceAddress": true
-      },
-      "creationDate": "2025-11-17 18:14:02",
-      "warehouse": "AUTO 5 BIERGES",
-      "isSale": true,
-      "isLayaway": false,
-      "isCancelled": false,
-      "priceIncludesTax": true,
-      "currency": "EUR",
-      "grossAmount": 81.11,
-      "netAmount": 67.03,
-      "lines": [
-        {
-          "id": "DC744004CB2C13E5944911D0AA4EC804",
-          "orderedQuantity": 1,
-          "grossAmount": 81.11,
-          "netAmount": 67.03,
-          "product": "39332",
-          "promotions": [...],
-          "taxes": [...]
-        }
-      ],
-      "payments": [
-        {
-          "name": "CASH",
-          "currency": "EUR",
-          "amount": 81.11,
-          "paidAmount": 81.1
-        }
-      ],
-      "taxes": [...],
-      "isReturn": false
+      "documentNo": "VBS1/0000080",
+      "documentStatus": "CO",
+      "orderDate": "2026-01-23",
+      "businessPartnerName": "Cliente Ejemplo",
+      "totalamount": 81.11,
+      "orderType": "ORD"
     }
   ],
-  "links": null
+  "totalRows": 1
 }
 ```
 
@@ -508,70 +446,8 @@ La respuesta es un relay directo del `ExportService/Order`:
 ```json
 {
   "error": true,
-  "message": "Missing required parameter: 'filter'. Valid values: byId, byDocumentNo, byOrgOrderDate, byOrgOrderDateRange",
+  "message": "Missing required parameter: 'pos'. Provide a valid terminal ID.",
   "statusCode": 400
-}
-```
-
-#### Diagrama de Flujo
-
-```
-┌──────────────┐     ┌─────────────┐     ┌──────────────────────────────────┐
-│   Cliente    │────▶│  GetOrders  │────▶│ org.openbravo.api.ExportService │
-│   (GET)      │     │  WebService │     │          /Order                  │
-└──────────────┘     └─────────────┘     └──────────────────────────────────┘
-       │                    │                           │
-       │    1. Valida       │                           │
-       │       filter       │                           │
-       │                    │    2. Construye URL       │
-       │                    │       según filter        │
-       │                    │                           │
-       │                    │    3. Invoca ExportService│
-       │                    │───────────────────────────▶
-       │                    │                           │
-       │                    │    4. Relay response      │
-       │◀───────────────────│◀──────────────────────────│
-       │                    │                           │
-```
-
-#### Características Técnicas
-
-1. **Proxy Pattern:** El endpoint actúa como proxy hacia el `ExportService` de Openbravo API
-2. **Autenticación:** Reenvía el header `Authorization` de la petición original
-3. **Validación de parámetros:** Valida que los parámetros requeridos estén presentes según el tipo de filtro
-4. **URL Encoding:** Los parámetros se codifican correctamente para URLs
-5. **Timeout configurado:** 30s para conexión, 60s para lectura
-   - Información del usuario
-   - Rol por defecto
-   - Lista de roles disponibles
-   - Idioma por defecto
-   - Lista de idiomas disponibles
-
-#### Respuesta Extendida
-
-```json
-{
-    "showMessage": false,
-    "user": {
-        "name": "Usuario POS",
-        "id": "USER_ID",
-        "defaultRole": {
-            "id": "ROLE_ID",
-            "identifier": "POS Cashier"
-        },
-        "roles": [
-            {"id": "ROLE_1", "identifier": "POS Cashier"},
-            {"id": "ROLE_2", "identifier": "POS Manager"}
-        ],
-        "defaultLanguage": {
-            "id": "LANG_ID",
-            "identifier": "Español"
-        },
-        "languages": [
-            {"id": "LANG_1", "identifier": "Español"},
-            {"id": "LANG_2", "identifier": "English"}
-        ]
-    }
 }
 ```
 

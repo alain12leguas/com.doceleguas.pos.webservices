@@ -1,16 +1,15 @@
+/*
+ ************************************************************************************
+ * Copyright (C) 2025 Doceleguas
+ * Licensed under the Openbravo Commercial License version 1.0
+ ************************************************************************************
+ */
 package com.doceleguas.pos.webservices;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.stream.Collectors;
+import java.io.StringWriter;
 
+import javax.enterprise.inject.spi.CDI;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -19,32 +18,27 @@ import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.openbravo.dal.core.OBContext;
+import org.openbravo.retail.posterminal.PaidReceiptsFilter;
 import org.openbravo.service.web.WebService;
 
 /**
- * Custom WebService to retrieve Orders from the Openbravo API ExportService.
+ * WebService to retrieve Orders using the PaidReceiptsFilter mechanism.
  * 
- * This endpoint acts as a proxy to the org.openbravo.api.ExportService/Order endpoint, providing a
- * simplified interface for querying orders with different filter types.
+ * <p>Accepts GET requests with query parameters and builds internally the JSON
+ * request expected by {@link PaidReceiptsFilter}.</p>
  * 
- * The authentication is handled by forwarding the Authorization header from the incoming request
- * to the ExportService. This ensures that the same credentials used to call this endpoint are
- * used to authenticate with the underlying ExportService.
+ * @see PaidReceiptsFilter
+ * @see org.openbravo.retail.posterminal.PaidReceiptsFilterProperties
  */
 public class GetOrders implements WebService {
 
   private static final Logger log = LogManager.getLogger();
 
-  private static final String EXPORT_SERVICE_PATH = "/ws/org.openbravo.api.ExportService/Order";
-  private static final String AUTHORIZATION_HEADER = "Authorization";
-  private static final int CONNECTION_TIMEOUT = 30000;
-  private static final int READ_TIMEOUT = 60000;
-
-  // Filter type constants
-  private static final String FILTER_BY_ID = "byId";
-  private static final String FILTER_BY_DOCUMENT_NO = "byDocumentNo";
-  private static final String FILTER_BY_ORG_ORDER_DATE = "byOrgOrderDate";
-  private static final String FILTER_BY_ORG_ORDER_DATE_RANGE = "byOrgOrderDateRange";
+  // Default values
+  private static final int DEFAULT_LIMIT = 50;
+  private static final int DEFAULT_OFFSET = 0;
+  private static final String DEFAULT_ORDER_BY = "creationDate desc, documentNo desc";
 
   @Override
   public void doGet(String path, HttpServletRequest request, HttpServletResponse response)
@@ -54,38 +48,28 @@ public class GetOrders implements WebService {
     response.setCharacterEncoding("UTF-8");
 
     try {
-      // Get and validate the Authorization header
-      String authHeader = request.getHeader(AUTHORIZATION_HEADER);
-      if (authHeader == null || authHeader.isEmpty()) {
-        sendErrorResponse(response, HttpServletResponse.SC_UNAUTHORIZED,
-            "Missing Authorization header. Use Basic Auth.");
-        return;
-      }
-
-      String filterType = request.getParameter("filter");
-
-      if (filterType == null || filterType.isEmpty()) {
+      // Validate required parameter: pos
+      String pos = request.getParameter("pos");
+      if (pos == null || pos.trim().isEmpty()) {
         sendErrorResponse(response, HttpServletResponse.SC_BAD_REQUEST,
-            "Missing required parameter: 'filter'. Valid values: byId, byDocumentNo, byOrgOrderDate, byOrgOrderDateRange");
+            "Missing required parameter: 'pos'. Provide a valid terminal ID.");
         return;
       }
 
-      String exportServiceRelativePath = buildExportServicePath(request, filterType);
-
-      if (exportServiceRelativePath == null) {
-        return;
-      }
-
-      // Build full URL for the ExportService
-      String fullUrl = buildFullUrl(request, exportServiceRelativePath);
+      // Build JSON request in the format expected by PaidReceiptsFilter
+      JSONObject jsonRequest = buildJsonRequest(request, pos.trim());
       
-      log.debug("Calling ExportService: {}", fullUrl);
+      log.debug("GetOrders request: {}", jsonRequest.toString());
 
-      // Call the ExportService and stream the response
-      callExportService(fullUrl, authHeader, response);
+      // Get the filter instance via CDI and execute
+      PaidReceiptsFilter filter = CDI.current().select(PaidReceiptsFilter.class).get();
+      StringWriter writer = new StringWriter();
+      filter.exec(writer, jsonRequest);
+      
+      // Write the response
+      String filterResult = writer.toString();
+      response.getWriter().write("{" + filterResult + "}");
 
-    } catch (MissingParameterException e) {
-      sendErrorResponse(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
     } catch (Exception e) {
       log.error("Error in GetOrders WebService", e);
       sendErrorResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
@@ -94,181 +78,169 @@ public class GetOrders implements WebService {
   }
 
   /**
-   * Builds the full URL for the ExportService based on the current request.
-   */
-  private String buildFullUrl(HttpServletRequest request, String relativePath) {
-    StringBuilder urlBuilder = new StringBuilder();
-    urlBuilder.append(request.getScheme())
-        .append("://")
-        .append(request.getServerName());
-    
-    int port = request.getServerPort();
-    if ((request.getScheme().equals("http") && port != 80) ||
-        (request.getScheme().equals("https") && port != 443)) {
-      urlBuilder.append(":").append(port);
-    }
-    
-    urlBuilder.append(request.getContextPath())
-        .append(relativePath);
-    
-    return urlBuilder.toString();
-  }
-
-  /**
-   * Calls the ExportService using HttpURLConnection and streams the response back.
-   * The Authorization header from the original request is forwarded to maintain authentication.
-   */
-  private void callExportService(String url, String authHeader, HttpServletResponse response)
-      throws IOException {
-    
-    HttpURLConnection connection = null;
-    
-    try {
-      URL exportUrl = new URL(url);
-      connection = (HttpURLConnection) exportUrl.openConnection();
-      connection.setRequestMethod("GET");
-      connection.setRequestProperty(AUTHORIZATION_HEADER, authHeader);
-      connection.setRequestProperty("Accept", "application/json");
-      connection.setConnectTimeout(CONNECTION_TIMEOUT);
-      connection.setReadTimeout(READ_TIMEOUT);
-      connection.setDoInput(true);
-
-      int responseCode = connection.getResponseCode();
-      response.setStatus(responseCode);
-
-      // Read the response (either from input stream or error stream)
-      String responseBody;
-      if (responseCode >= 200 && responseCode < 300) {
-        try (BufferedReader reader = new BufferedReader(
-            new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-          responseBody = reader.lines().collect(Collectors.joining("\n"));
-        }
-      } else {
-        try (BufferedReader reader = new BufferedReader(
-            new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
-          responseBody = reader.lines().collect(Collectors.joining("\n"));
-        }
-      }
-
-      // Copy relevant headers from ExportService response
-      String contentType = connection.getContentType();
-      if (contentType != null) {
-        response.setContentType(contentType);
-      }
-
-      // Write the response body
-      response.getWriter().write(responseBody);
-
-    } finally {
-      if (connection != null) {
-        connection.disconnect();
-      }
-    }
-  }
-
-  /**
-   * Builds the Export Service path based on the filter type and request parameters.
+   * Builds the JSON request in the format expected by PaidReceiptsFilter.
    * 
-   * @param request
-   *          The HTTP request
-   * @param filterType
-   *          The type of filter to apply
-   * @return The relative path to call the Export Service
-   * @throws MissingParameterException
-   *           if required parameters are missing
+   * <p>The resulting JSON follows the mobile core convention:</p>
+   * <pre>
+   * {
+   *   "client": "...",
+   *   "organization": "...",
+   *   "pos": "...",
+   *   "remoteFilters": [...],
+   *   "orderByClause": "...",
+   *   "_limit": 50,
+   *   "_offset": 0
+   * }
+   * </pre>
    */
-  private String buildExportServicePath(HttpServletRequest request, String filterType)
-      throws MissingParameterException, UnsupportedEncodingException {
+  private JSONObject buildJsonRequest(HttpServletRequest request, String pos) throws JSONException {
+    JSONObject json = new JSONObject();
+    JSONArray remoteFilters = new JSONArray();
 
-    StringBuilder pathBuilder = new StringBuilder(EXPORT_SERVICE_PATH);
+    // Required context fields
+    json.put("client", OBContext.getOBContext().getCurrentClient().getId());
+    json.put("organization", OBContext.getOBContext().getCurrentOrganization().getId());
+    json.put("pos", pos);
 
-    switch (filterType) {
-      case FILTER_BY_ID:
-        return buildByIdPath(request, pathBuilder);
-
-      case FILTER_BY_DOCUMENT_NO:
-        return buildByDocumentNoPath(request, pathBuilder);
-
-      case FILTER_BY_ORG_ORDER_DATE:
-        return buildByOrgOrderDatePath(request, pathBuilder);
-
-      case FILTER_BY_ORG_ORDER_DATE_RANGE:
-        return buildByOrgOrderDateRangePath(request, pathBuilder);
-
-      default:
-        throw new MissingParameterException("Invalid filter type: '" + filterType
-            + "'. Valid values: byId, byDocumentNo, byOrgOrderDate, byOrgOrderDateRange");
+    // Build remoteFilters from query parameters
+    
+    // documentNo - contains filter
+    String documentNo = request.getParameter("documentNo");
+    if (isNotEmpty(documentNo)) {
+      remoteFilters.put(buildFilter("documentNo", documentNo, "contains"));
     }
+
+    // businessPartner - equals filter
+    String businessPartner = request.getParameter("businessPartner");
+    if (isNotEmpty(businessPartner)) {
+      remoteFilters.put(buildFilter("businessPartner", businessPartner, "="));
+    }
+
+    // orderDateFrom and orderDateTo - combined as a date range filter
+    String orderDateFrom = request.getParameter("orderDateFrom");
+    String orderDateTo = request.getParameter("orderDateTo");
+    if (isNotEmpty(orderDateFrom) || isNotEmpty(orderDateTo)) {
+      remoteFilters.put(buildDateFilter("orderDate", "OrderDate", orderDateFrom, orderDateTo));
+    }
+
+    // totalamountFrom and totalamountTo - combined as an amount range filter
+    String totalamountFrom = request.getParameter("totalamountFrom");
+    String totalamountTo = request.getParameter("totalamountTo");
+    if (isNotEmpty(totalamountFrom) || isNotEmpty(totalamountTo)) {
+      remoteFilters.put(buildAmountFilter("totalamount", totalamountFrom, totalamountTo));
+    }
+
+    // orderType - equals filter (ORD, RET, LAY, verifiedReturns, payOpenTickets)
+    String orderType = request.getParameter("orderType");
+    if (isNotEmpty(orderType)) {
+      remoteFilters.put(buildFilter("orderType", orderType, "="));
+    }
+
+    // store - for cross-store filtering
+    String store = request.getParameter("store");
+    if (isNotEmpty(store)) {
+      remoteFilters.put(buildFilter("store", store, "="));
+    }
+
+    json.put("remoteFilters", remoteFilters);
+
+    // Pagination
+    json.put("_limit", parseIntOrDefault(request.getParameter("limit"), DEFAULT_LIMIT));
+    json.put("_offset", parseIntOrDefault(request.getParameter("offset"), DEFAULT_OFFSET));
+
+    // Ordering
+    String orderBy = request.getParameter("orderBy");
+    json.put("orderByClause", isNotEmpty(orderBy) ? orderBy : DEFAULT_ORDER_BY);
+    json.put("orderByProperties", JSONObject.NULL);
+
+    return json;
   }
 
   /**
-   * Builds path for filtering by Order ID. Example:
-   * /ws/org.openbravo.api.ExportService/Order/068DCCBCB90F80C459DD7BA46E32C16B
+   * Builds a simple filter object.
+   * 
+   * @param column The column name to filter on
+   * @param value The filter value
+   * @param operator The filter operator (=, contains, etc.)
    */
-  private String buildByIdPath(HttpServletRequest request, StringBuilder pathBuilder)
-      throws MissingParameterException {
-    String id = getRequiredParameter(request, "id");
-    pathBuilder.append("/").append(id);
-    return pathBuilder.toString();
+  private JSONObject buildFilter(String column, String value, String operator) throws JSONException {
+    JSONObject filter = new JSONObject();
+    filter.put("columns", new JSONArray().put(column));
+    filter.put("value", value);
+    filter.put("operator", operator);
+    filter.put("isId", false);
+    return filter;
   }
 
   /**
-   * Builds path for filtering by Document Number. Example:
-   * /ws/org.openbravo.api.ExportService/Order/byDocumentNo?documentNo=VBS1/0000080
+   * Builds a date range filter object.
+   * 
+   * <p>Uses the "filter" operator with params array [fromDate, toDate]
+   * as expected by PaidReceiptsFilter for date ranges.</p>
+   * 
+   * @param column The column name (e.g., "orderDate")
+   * @param displayValue The display value (e.g., "OrderDate")
+   * @param fromDate Start date (can be null)
+   * @param toDate End date (can be null)
    */
-  private String buildByDocumentNoPath(HttpServletRequest request, StringBuilder pathBuilder)
-      throws MissingParameterException, UnsupportedEncodingException {
-    String documentNo = getRequiredParameter(request, "documentNo");
-    pathBuilder.append("/byDocumentNo?documentNo=")
-        .append(URLEncoder.encode(documentNo, StandardCharsets.UTF_8.toString()));
-    return pathBuilder.toString();
+  private JSONObject buildDateFilter(String column, String displayValue, 
+      String fromDate, String toDate) throws JSONException {
+    JSONObject filter = new JSONObject();
+    filter.put("columns", new JSONArray().put(column));
+    filter.put("value", displayValue);
+    filter.put("operator", "filter");
+    
+    JSONArray params = new JSONArray();
+    params.put(fromDate != null ? fromDate : JSONObject.NULL);
+    params.put(toDate != null ? toDate : JSONObject.NULL);
+    filter.put("params", params);
+    
+    filter.put("isId", false);
+    return filter;
   }
 
   /**
-   * Builds path for filtering by Organization and Order Date. Example:
-   * /ws/org.openbravo.api.ExportService/Order/byOrgOrderDate?organization=Store&orderDate=2025-01-15
+   * Builds an amount range filter object.
+   * 
+   * @param column The column name (e.g., "totalamount")
+   * @param fromAmount Minimum amount (can be null)
+   * @param toAmount Maximum amount (can be null)
    */
-  private String buildByOrgOrderDatePath(HttpServletRequest request, StringBuilder pathBuilder)
-      throws MissingParameterException, UnsupportedEncodingException {
-    String organization = getRequiredParameter(request, "organization");
-    String orderDate = getRequiredParameter(request, "orderDate");
-
-    pathBuilder.append("/byOrgOrderDate?organization=")
-        .append(URLEncoder.encode(organization, StandardCharsets.UTF_8.toString()))
-        .append("&orderDate=")
-        .append(URLEncoder.encode(orderDate, StandardCharsets.UTF_8.toString()));
-    return pathBuilder.toString();
+  private JSONObject buildAmountFilter(String column, String fromAmount, String toAmount) 
+      throws JSONException {
+    JSONObject filter = new JSONObject();
+    filter.put("columns", new JSONArray().put(column));
+    filter.put("value", "Amount");
+    filter.put("operator", "filter");
+    
+    JSONArray params = new JSONArray();
+    params.put(fromAmount != null ? fromAmount : JSONObject.NULL);
+    params.put(toAmount != null ? toAmount : JSONObject.NULL);
+    filter.put("params", params);
+    
+    filter.put("isId", false);
+    return filter;
   }
 
   /**
-   * Builds path for filtering by Organization and Date Range. Example:
-   * /ws/org.openbravo.api.ExportService/Order/byOrgOrderDateRange?organization=Store&dateFrom=2025-01-01&dateTo=2025-01-31
+   * Checks if a string is not null and not empty.
    */
-  private String buildByOrgOrderDateRangePath(HttpServletRequest request, StringBuilder pathBuilder)
-      throws MissingParameterException, UnsupportedEncodingException {
-    String organization = getRequiredParameter(request, "organization");
-    String dateFrom = getRequiredParameter(request, "dateFrom");
-    String dateTo = getRequiredParameter(request, "dateTo");
-
-    pathBuilder.append("/byOrgOrderDateRange?organization=")
-        .append(URLEncoder.encode(organization, StandardCharsets.UTF_8.toString()))
-        .append("&dateFrom=")
-        .append(URLEncoder.encode(dateFrom, StandardCharsets.UTF_8.toString()))
-        .append("&dateTo=")
-        .append(URLEncoder.encode(dateTo, StandardCharsets.UTF_8.toString()));
-    return pathBuilder.toString();
+  private boolean isNotEmpty(String value) {
+    return value != null && !value.trim().isEmpty();
   }
 
   /**
-   * Gets a required parameter from the request, throwing an exception if missing.
+   * Parses an integer from a string, returning a default value if parsing fails.
    */
-  private String getRequiredParameter(HttpServletRequest request, String paramName)
-      throws MissingParameterException {
-    String value = request.getParameter(paramName);
+  private int parseIntOrDefault(String value, int defaultValue) {
     if (value == null || value.trim().isEmpty()) {
-      throw new MissingParameterException("Missing required parameter: '" + paramName + "'");
+      return defaultValue;
     }
-    return value.trim();
+    try {
+      return Integer.parseInt(value.trim());
+    } catch (NumberFormatException e) {
+      return defaultValue;
+    }
   }
 
   /**
@@ -288,60 +260,24 @@ public class GetOrders implements WebService {
     }
   }
 
-  /**
-   * Custom exception for missing required parameters.
-   */
-  private static class MissingParameterException extends Exception {
-    private static final long serialVersionUID = 1L;
-
-    public MissingParameterException(String message) {
-      super(message);
-    }
-  }
-
-  /**
-   * Utility method to convert request parameters to JSON (for potential future use).
-   */
-  public JSONObject requestParamsToJson(JSONObject jsonParams, HttpServletRequest request)
-      throws JSONException {
-    Map<String, String[]> params = request.getParameterMap();
-
-    for (Map.Entry<String, String[]> entry : params.entrySet()) {
-      String key = entry.getKey();
-      String[] values = entry.getValue();
-
-      if (values.length == 1) {
-        jsonParams.put(key, values[0]);
-      } else if (values.length > 1) {
-        JSONArray jsonArray = new JSONArray();
-        for (String value : values) {
-          jsonArray.put(value);
-        }
-        jsonParams.put(key, jsonArray);
-      }
-    }
-
-    return jsonParams;
-  }
-
   @Override
   public void doPost(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-        "POST method not supported. Use GET instead.");
+        "POST method not supported. Use GET with query parameters.");
   }
 
   @Override
   public void doDelete(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-        "DELETE method not supported. Use GET instead.");
+        "DELETE method not supported. Use GET with query parameters.");
   }
 
   @Override
   public void doPut(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-        "PUT method not supported. Use GET instead.");
+        "PUT method not supported. Use GET with query parameters.");
   }
 }
