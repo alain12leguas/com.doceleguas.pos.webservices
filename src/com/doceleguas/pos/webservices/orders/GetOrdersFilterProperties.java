@@ -139,7 +139,6 @@ public class GetOrdersFilterProperties extends ModelExtension {
     return properties;
   }
 
-  @Override
   public int getPriority() {
     // Default priority, other extensions can use higher values to add after
     return 0;

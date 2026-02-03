@@ -160,21 +160,25 @@ public class GetOrdersFilter extends ProcessHQLQueryValidated {
   }
 
   @Override
-  protected boolean hasRelevantRemoteFilters(JSONArray remoteFilters) throws JSONException {
+  protected boolean hasRelevantRemoteFilters(JSONArray remoteFilters) {
     // Check if any of our supported filters are present
-    for (int i = 0; i < remoteFilters.length(); i++) {
-      JSONObject filter = remoteFilters.getJSONObject(i);
-      if (filter.has("columns")) {
-        JSONArray columns = filter.getJSONArray("columns");
-        for (int j = 0; j < columns.length(); j++) {
-          String column = columns.getString(j);
-          if ("id".equals(column) || "documentNo".equals(column) || "organization".equals(column)
-              || "orderDate".equals(column) || "dateFrom".equals(column)
-              || "dateTo".equals(column)) {
-            return true;
+    try {
+      for (int i = 0; i < remoteFilters.length(); i++) {
+        JSONObject filter = remoteFilters.getJSONObject(i);
+        if (filter.has("columns")) {
+          JSONArray columns = filter.getJSONArray("columns");
+          for (int j = 0; j < columns.length(); j++) {
+            String column = columns.getString(j);
+            if ("id".equals(column) || "documentNo".equals(column) || "organization".equals(column)
+                || "orderDate".equals(column) || "dateFrom".equals(column)
+                || "dateTo".equals(column)) {
+              return true;
+            }
           }
         }
       }
+    } catch (JSONException e) {
+      log.error("Error parsing remoteFilters", e);
     }
     return false;
   }
