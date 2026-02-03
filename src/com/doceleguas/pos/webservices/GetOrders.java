@@ -1,14 +1,15 @@
 /*
  ************************************************************************************
- * Copyright (C) 2025 Doceleguas
- * Licensed under the Openbravo Commercial License version 1.0
+ * Copyright (C) 2026 Doceleguas
+ * Licensed under the Openbravo Public License version 1.0
  ************************************************************************************
  */
 package com.doceleguas.pos.webservices;
 
-import java.io.IOException;
 import java.io.StringWriter;
+import java.util.Map;
 
+import javax.enterprise.inject.spi.CDI;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -17,28 +18,67 @@ import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
-import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.dal.core.OBContext;
-import org.openbravo.retail.posterminal.PaidReceiptsFilter;
 import org.openbravo.service.web.WebService;
 
+import com.doceleguas.pos.webservices.orders.GetOrdersFilter;
+
 /**
- * WebService to retrieve Orders using the PaidReceiptsFilter mechanism.
+ * WebService endpoint for querying Orders with various filter options.
  * 
- * <p>Accepts GET requests with query parameters and builds internally the JSON
- * request expected by {@link PaidReceiptsFilter}.</p>
+ * This service provides a REST API for retrieving order data using different
+ * filter types. It acts as a wrapper that translates HTTP parameters into the
+ * JSON format expected by {@link GetOrdersFilter}, which executes the actual
+ * HQL query against the database.
  * 
- * @see PaidReceiptsFilter
- * @see org.openbravo.retail.posterminal.PaidReceiptsFilterProperties
+ * <h2>Architecture</h2>
+ * This implementation follows the ProcessHQLQueryValidated pattern used by
+ * PaidReceiptsFilter in the retail.posterminal module, providing:
+ * <ul>
+ *   <li>Direct DAL access (no HTTP proxy overhead)</li>
+ *   <li>Extensible properties via CDI/ModelExtension</li>
+ *   <li>Native pagination with _limit and _offset</li>
+ *   <li>Consistent API with other mobile endpoints</li>
+ * </ul>
+ * 
+ * <h2>Endpoint</h2>
+ * <pre>GET /ws/com.doceleguas.pos.webservices.GetOrders</pre>
+ * 
+ * <h2>Filter Types</h2>
+ * <ul>
+ *   <li><b>byId</b>: Filter by order UUID. Requires: id</li>
+ *   <li><b>byDocumentNo</b>: Filter by document number. Requires: documentNo</li>
+ *   <li><b>byOrgOrderDate</b>: Filter by org and date. Requires: organization, orderDate</li>
+ *   <li><b>byOrgOrderDateRange</b>: Filter by org and date range. Requires: organization, dateFrom, dateTo</li>
+ * </ul>
+ * 
+ * <h2>Optional Parameters</h2>
+ * <ul>
+ *   <li><b>limit</b>: Maximum number of results (default: unlimited)</li>
+ *   <li><b>offset</b>: Offset for pagination (default: 0)</li>
+ *   <li><b>orderBy</b>: Order by clause (e.g., "orderDate desc")</li>
+ * </ul>
+ * 
+ * <h2>Example Requests</h2>
+ * <pre>
+ * GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byId&amp;id=ABC123
+ * GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byDocumentNo&amp;documentNo=ORD-001
+ * GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDate&amp;organization=STORE1&amp;orderDate=2025-01-15
+ * GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDateRange&amp;organization=STORE1&amp;dateFrom=2025-01-01&amp;dateTo=2025-01-31&amp;limit=100
+ * </pre>
+ * 
+ * @see GetOrdersFilter
+ * @see com.doceleguas.pos.webservices.orders.GetOrdersFilterProperties
  */
 public class GetOrders implements WebService {
 
   private static final Logger log = LogManager.getLogger();
 
-  // Default values
-  private static final int DEFAULT_LIMIT = 50;
-  private static final int DEFAULT_OFFSET = 0;
-  private static final String DEFAULT_ORDER_BY = "creationDate desc, documentNo desc";
+  // Filter type constants
+  private static final String FILTER_BY_ID = "byId";
+  private static final String FILTER_BY_DOCUMENT_NO = "byDocumentNo";
+  private static final String FILTER_BY_ORG_ORDER_DATE = "byOrgOrderDate";
+  private static final String FILTER_BY_ORG_ORDER_DATE_RANGE = "byOrgOrderDateRange";
 
   @Override
   public void doGet(String path, HttpServletRequest request, HttpServletResponse response)
@@ -47,30 +87,50 @@ public class GetOrders implements WebService {
     response.setContentType("application/json");
     response.setCharacterEncoding("UTF-8");
 
+    long startTime = System.currentTimeMillis();
+
     try {
-      // Validate required parameter: pos
-      String pos = request.getParameter("pos");
-      if (pos == null || pos.trim().isEmpty()) {
-        sendErrorResponse(response, HttpServletResponse.SC_BAD_REQUEST,
-            "Missing required parameter: 'pos'. Provide a valid terminal ID.");
-        return;
+      // Build JSON request from HTTP parameters
+      JSONObject jsonsent = buildJsonRequest(request);
+
+      log.debug("GetOrders request: {}", jsonsent.toString());
+
+      // Get the filter instance via CDI
+      GetOrdersFilter filter = CDI.current().select(GetOrdersFilter.class).get();
+
+      // Execute the filter
+      StringWriter writer = new StringWriter();
+      filter.exec(writer, jsonsent);
+
+      // Build the response wrapper
+      String filterOutput = writer.toString();
+      if (filterOutput != null && !filterOutput.isEmpty()) {
+        // The ProcessHQLQuery writes JSON fragments, we wrap them properly
+        if (filterOutput.startsWith("\"data\":")) {
+          // Already has data wrapper from ProcessHQLQuery
+          response.getWriter().write("{" + filterOutput + "}");
+        } else {
+          // Wrap in standard response format
+          response.getWriter().write("{\"success\":true," + filterOutput + "}");
+        }
+      } else {
+        // Empty result
+        JSONObject emptyResponse = new JSONObject();
+        emptyResponse.put("data", new JSONArray());
+        emptyResponse.put("success", true);
+        emptyResponse.put("totalRows", 0);
+        response.getWriter().write(emptyResponse.toString());
       }
 
-      // Build JSON request in the format expected by PaidReceiptsFilter
-      JSONObject jsonRequest = buildJsonRequest(request, pos.trim());
-      
-      log.debug("GetOrders request: {}", jsonRequest.toString());
+      long elapsed = System.currentTimeMillis() - startTime;
+      log.debug("GetOrders completed in {}ms", elapsed);
 
-      // Get the filter instance via WeldUtils and execute
-      PaidReceiptsFilter filter = WeldUtils
-          .getInstanceFromStaticBeanManager(PaidReceiptsFilter.class);
-      StringWriter writer = new StringWriter();
-      filter.exec(writer, jsonRequest);
-      
-      // Write the response
-      String filterResult = writer.toString();
-      response.getWriter().write("{" + filterResult + "}");
-
+    } catch (MissingParameterException e) {
+      log.warn("Missing parameter in GetOrders: {}", e.getMessage());
+      sendErrorResponse(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+    } catch (InvalidFilterException e) {
+      log.warn("Invalid filter in GetOrders: {}", e.getMessage());
+      sendErrorResponse(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
     } catch (Exception e) {
       log.error("Error in GetOrders WebService", e);
       sendErrorResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
@@ -79,206 +139,282 @@ public class GetOrders implements WebService {
   }
 
   /**
-   * Builds the JSON request in the format expected by PaidReceiptsFilter.
+   * Transforms HTTP request parameters into the JSON format expected by GetOrdersFilter.
    * 
-   * <p>The resulting JSON follows the mobile core convention:</p>
-   * <pre>
-   * {
-   *   "client": "...",
-   *   "organization": "...",
-   *   "pos": "...",
-   *   "remoteFilters": [...],
-   *   "orderByClause": "...",
-   *   "_limit": 50,
-   *   "_offset": 0
-   * }
-   * </pre>
+   * This method handles the translation between the external REST API format and the
+   * internal ProcessHQLQuery JSON format, including:
+   * - Client and organization context from OBContext
+   * - Filter type translation to remoteFilters array
+   * - Pagination parameters (_limit, _offset)
+   * - Order by clause
+   * 
+   * @param request The HTTP servlet request
+   * @return JSONObject in the format expected by ProcessHQLQuery
+   * @throws MissingParameterException if required parameters are missing
+   * @throws InvalidFilterException if the filter type is invalid
+   * @throws JSONException if JSON construction fails
    */
-  private JSONObject buildJsonRequest(HttpServletRequest request, String pos) throws JSONException {
+  private JSONObject buildJsonRequest(HttpServletRequest request)
+      throws MissingParameterException, InvalidFilterException, JSONException {
+
+    String filterType = request.getParameter("filter");
+    if (filterType == null || filterType.isEmpty()) {
+      throw new MissingParameterException(
+          "Missing 'filter' parameter. Valid values: byId, byDocumentNo, byOrgOrderDate, byOrgOrderDateRange");
+    }
+
     JSONObject json = new JSONObject();
     JSONArray remoteFilters = new JSONArray();
+    JSONObject parameters = new JSONObject();
 
-    // Required context fields
-    json.put("client", OBContext.getOBContext().getCurrentClient().getId());
-    json.put("organization", OBContext.getOBContext().getCurrentOrganization().getId());
-    json.put("pos", pos);
+    // Set client and organization from OBContext
+    OBContext ctx = OBContext.getOBContext();
+    json.put("client", ctx.getCurrentClient().getId());
+    json.put("organization", ctx.getCurrentOrganization().getId());
 
-    // Build remoteFilters from query parameters
-    
-    // documentNo - contains filter
-    String documentNo = request.getParameter("documentNo");
-    if (isNotEmpty(documentNo)) {
-      remoteFilters.put(buildFilter("documentNo", documentNo, "contains"));
+    // Handle pagination
+    String limit = request.getParameter("limit");
+    if (limit != null && !limit.isEmpty()) {
+      try {
+        json.put("_limit", Integer.parseInt(limit));
+      } catch (NumberFormatException e) {
+        log.warn("Invalid limit parameter: {}", limit);
+      }
     }
 
-    // businessPartner - equals filter
-    String businessPartner = request.getParameter("businessPartner");
-    if (isNotEmpty(businessPartner)) {
-      remoteFilters.put(buildFilter("businessPartner", businessPartner, "="));
+    String offset = request.getParameter("offset");
+    if (offset != null && !offset.isEmpty()) {
+      try {
+        json.put("_offset", Integer.parseInt(offset));
+      } catch (NumberFormatException e) {
+        log.warn("Invalid offset parameter: {}", offset);
+      }
     }
 
-    // orderDateFrom and orderDateTo - combined as a date range filter
-    String orderDateFrom = request.getParameter("orderDateFrom");
-    String orderDateTo = request.getParameter("orderDateTo");
-    if (isNotEmpty(orderDateFrom) || isNotEmpty(orderDateTo)) {
-      remoteFilters.put(buildDateFilter("orderDate", "OrderDate", orderDateFrom, orderDateTo));
+    // Handle order by
+    String orderBy = request.getParameter("orderBy");
+    if (orderBy != null && !orderBy.isEmpty()) {
+      // Sanitize orderBy to prevent injection
+      String sanitized = sanitizeOrderBy(orderBy);
+      if (sanitized != null) {
+        json.put("orderByClause", sanitized);
+      }
+    } else {
+      // Default ordering by creation date descending
+      json.put("orderByClause", "ord.creationDate desc");
     }
 
-    // totalamountFrom and totalamountTo - combined as an amount range filter
-    String totalamountFrom = request.getParameter("totalamountFrom");
-    String totalamountTo = request.getParameter("totalamountTo");
-    if (isNotEmpty(totalamountFrom) || isNotEmpty(totalamountTo)) {
-      remoteFilters.put(buildAmountFilter("totalamount", totalamountFrom, totalamountTo));
-    }
+    // Build remoteFilters based on filter type
+    switch (filterType) {
+      case FILTER_BY_ID:
+        String id = getRequiredParameter(request, "id");
+        remoteFilters.put(buildRemoteFilter("id", id, "equals"));
+        break;
 
-    // orderType - equals filter (ORD, RET, LAY, verifiedReturns, payOpenTickets)
-    String orderType = request.getParameter("orderType");
-    if (isNotEmpty(orderType)) {
-      remoteFilters.put(buildFilter("orderType", orderType, "="));
-    }
+      case FILTER_BY_DOCUMENT_NO:
+        String documentNo = getRequiredParameter(request, "documentNo");
+        remoteFilters.put(buildRemoteFilter("documentNo", documentNo, "iContains"));
+        break;
 
-    // store - for cross-store filtering
-    String store = request.getParameter("store");
-    if (isNotEmpty(store)) {
-      remoteFilters.put(buildFilter("store", store, "="));
+      case FILTER_BY_ORG_ORDER_DATE:
+        String orgName = getRequiredParameter(request, "organization");
+        String orderDate = getRequiredParameter(request, "orderDate");
+        remoteFilters.put(buildRemoteFilter("organization", orgName, "iContains"));
+        remoteFilters.put(buildRemoteFilter("orderDate", orderDate, "equals"));
+        break;
+
+      case FILTER_BY_ORG_ORDER_DATE_RANGE:
+        String org = getRequiredParameter(request, "organization");
+        String dateFrom = getRequiredParameter(request, "dateFrom");
+        String dateTo = getRequiredParameter(request, "dateTo");
+        remoteFilters.put(buildRemoteFilter("organization", org, "iContains"));
+        // Store date range in parameters for the HQL where clause
+        parameters.put("dateFrom", dateFrom);
+        parameters.put("dateTo", dateTo);
+        break;
+
+      default:
+        throw new InvalidFilterException("Invalid filter type: '" + filterType
+            + "'. Valid values: byId, byDocumentNo, byOrgOrderDate, byOrgOrderDateRange");
     }
 
     json.put("remoteFilters", remoteFilters);
-
-    // Pagination
-    json.put("_limit", parseIntOrDefault(request.getParameter("limit"), DEFAULT_LIMIT));
-    json.put("_offset", parseIntOrDefault(request.getParameter("offset"), DEFAULT_OFFSET));
-
-    // Ordering
-    String orderBy = request.getParameter("orderBy");
-    json.put("orderByClause", isNotEmpty(orderBy) ? orderBy : DEFAULT_ORDER_BY);
-    json.put("orderByProperties", JSONObject.NULL);
+    json.put("parameters", parameters);
 
     return json;
   }
 
   /**
-   * Builds a simple filter object.
+   * Builds a remote filter object in the format expected by ProcessHQLQuery.
    * 
-   * @param column The column name to filter on
+   * @param column The column/property to filter on
    * @param value The filter value
-   * @param operator The filter operator (=, contains, etc.)
+   * @param operator The filter operator (equals, iContains, etc.)
+   * @return JSONObject representing the remote filter
+   * @throws JSONException if JSON construction fails
    */
-  private JSONObject buildFilter(String column, String value, String operator) throws JSONException {
-    JSONObject filter = new JSONObject();
-    filter.put("columns", new JSONArray().put(column));
-    filter.put("value", value);
-    filter.put("operator", operator);
-    filter.put("isId", false);
-    return filter;
-  }
-
-  /**
-   * Builds a date range filter object.
-   * 
-   * <p>Uses the "filter" operator with params array [fromDate, toDate]
-   * as expected by PaidReceiptsFilter for date ranges.</p>
-   * 
-   * @param column The column name (e.g., "orderDate")
-   * @param displayValue The display value (e.g., "OrderDate")
-   * @param fromDate Start date (can be null)
-   * @param toDate End date (can be null)
-   */
-  private JSONObject buildDateFilter(String column, String displayValue, 
-      String fromDate, String toDate) throws JSONException {
-    JSONObject filter = new JSONObject();
-    filter.put("columns", new JSONArray().put(column));
-    filter.put("value", displayValue);
-    filter.put("operator", "filter");
-    
-    JSONArray params = new JSONArray();
-    params.put(fromDate != null ? fromDate : JSONObject.NULL);
-    params.put(toDate != null ? toDate : JSONObject.NULL);
-    filter.put("params", params);
-    
-    filter.put("isId", false);
-    return filter;
-  }
-
-  /**
-   * Builds an amount range filter object.
-   * 
-   * @param column The column name (e.g., "totalamount")
-   * @param fromAmount Minimum amount (can be null)
-   * @param toAmount Maximum amount (can be null)
-   */
-  private JSONObject buildAmountFilter(String column, String fromAmount, String toAmount) 
+  private JSONObject buildRemoteFilter(String column, String value, String operator)
       throws JSONException {
     JSONObject filter = new JSONObject();
-    filter.put("columns", new JSONArray().put(column));
-    filter.put("value", "Amount");
-    filter.put("operator", "filter");
-    
-    JSONArray params = new JSONArray();
-    params.put(fromAmount != null ? fromAmount : JSONObject.NULL);
-    params.put(toAmount != null ? toAmount : JSONObject.NULL);
-    filter.put("params", params);
-    
-    filter.put("isId", false);
+    JSONArray columns = new JSONArray();
+    columns.put(column);
+    filter.put("columns", columns);
+    filter.put("value", value);
+    filter.put("operator", operator);
     return filter;
   }
 
   /**
-   * Checks if a string is not null and not empty.
+   * Gets a required parameter from the request, throwing an exception if missing.
+   * 
+   * @param request The HTTP request
+   * @param paramName The parameter name
+   * @return The parameter value (trimmed)
+   * @throws MissingParameterException if the parameter is missing or empty
    */
-  private boolean isNotEmpty(String value) {
-    return value != null && !value.trim().isEmpty();
+  private String getRequiredParameter(HttpServletRequest request, String paramName)
+      throws MissingParameterException {
+    String value = request.getParameter(paramName);
+    if (value == null || value.trim().isEmpty()) {
+      throw new MissingParameterException("Missing required parameter: '" + paramName + "'");
+    }
+    return value.trim();
   }
 
   /**
-   * Parses an integer from a string, returning a default value if parsing fails.
+   * Sanitizes the orderBy clause to prevent SQL injection.
+   * Only allows safe column references and order directions.
+   * 
+   * @param orderBy The raw orderBy value
+   * @return Sanitized orderBy or null if invalid
    */
-  private int parseIntOrDefault(String value, int defaultValue) {
-    if (value == null || value.trim().isEmpty()) {
-      return defaultValue;
+  private String sanitizeOrderBy(String orderBy) {
+    if (orderBy == null) {
+      return null;
     }
-    try {
-      return Integer.parseInt(value.trim());
-    } catch (NumberFormatException e) {
-      return defaultValue;
+
+    // Only allow alphanumeric, dots, underscores, spaces, and asc/desc
+    String sanitized = orderBy.replaceAll("[^a-zA-Z0-9_.\\s]", "").trim();
+
+    // Verify it ends with asc or desc (case insensitive)
+    String lower = sanitized.toLowerCase();
+    if (!lower.endsWith("asc") && !lower.endsWith("desc")) {
+      sanitized = sanitized + " asc";
     }
+
+    // Ensure it starts with a valid prefix
+    if (!sanitized.startsWith("ord.")) {
+      sanitized = "ord." + sanitized;
+    }
+
+    return sanitized;
   }
 
   /**
    * Sends an error response as JSON.
+   * 
+   * @param response The HTTP response
+   * @param statusCode The HTTP status code
+   * @param message The error message
    */
-  private void sendErrorResponse(HttpServletResponse response, int statusCode, String message)
-      throws IOException {
+  private void sendErrorResponse(HttpServletResponse response, int statusCode, String message) {
     response.setStatus(statusCode);
     try {
       JSONObject errorJson = new JSONObject();
+      errorJson.put("success", false);
       errorJson.put("error", true);
       errorJson.put("message", message);
       errorJson.put("statusCode", statusCode);
       response.getWriter().write(errorJson.toString());
-    } catch (JSONException e) {
-      response.getWriter().write("{\"error\":true,\"message\":\"" + message + "\"}");
+    } catch (Exception e) {
+      log.error("Error sending error response", e);
+      try {
+        response.getWriter().write("{\"error\":true,\"message\":\"" + message + "\"}");
+      } catch (Exception ex) {
+        log.error("Failed to write error response", ex);
+      }
     }
   }
+
+  /**
+   * Utility method to convert all request parameters to JSON.
+   * Useful for debugging or for passing all parameters to the filter.
+   * 
+   * @param jsonParams Base JSON object to add parameters to
+   * @param request The HTTP request
+   * @return The JSON object with added parameters
+   * @throws JSONException if JSON construction fails
+   */
+  public JSONObject requestParamsToJson(JSONObject jsonParams, HttpServletRequest request)
+      throws JSONException {
+    Map<String, String[]> params = request.getParameterMap();
+
+    for (Map.Entry<String, String[]> entry : params.entrySet()) {
+      String key = entry.getKey();
+      String[] values = entry.getValue();
+
+      if (values.length == 1) {
+        jsonParams.put(key, values[0]);
+      } else if (values.length > 1) {
+        JSONArray jsonArray = new JSONArray();
+        for (String value : values) {
+          jsonArray.put(value);
+        }
+        jsonParams.put(key, jsonArray);
+      }
+    }
+
+    return jsonParams;
+  }
+
+  // ============================================
+  // Exception Classes
+  // ============================================
+
+  /**
+   * Exception thrown when a required parameter is missing.
+   */
+  private static class MissingParameterException extends Exception {
+    private static final long serialVersionUID = 1L;
+
+    public MissingParameterException(String message) {
+      super(message);
+    }
+  }
+
+  /**
+   * Exception thrown when an invalid filter type is specified.
+   */
+  private static class InvalidFilterException extends Exception {
+    private static final long serialVersionUID = 1L;
+
+    public InvalidFilterException(String message) {
+      super(message);
+    }
+  }
+
+  // ============================================
+  // Unsupported HTTP Methods
+  // ============================================
 
   @Override
   public void doPost(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-        "POST method not supported. Use GET with query parameters.");
+        "POST method not supported. Use GET instead.");
   }
 
   @Override
   public void doDelete(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-        "DELETE method not supported. Use GET with query parameters.");
+        "DELETE method not supported. Use GET instead.");
   }
 
   @Override
   public void doPut(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-        "PUT method not supported. Use GET with query parameters.");
+        "PUT method not supported. Use GET instead.");
   }
 }
