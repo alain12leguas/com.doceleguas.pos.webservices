@@ -26,54 +26,9 @@ import com.doceleguas.pos.webservices.orders.OrderModel;
 /**
  * WebService endpoint for retrieving a single Order by ID.
  * 
- * <p>This service provides a REST API for retrieving detailed order data for a specific
+ * This service provides a REST API for retrieving detailed order data for a specific
  * order identified by its UUID. It is the equivalent of PaidReceipts in the
- * org.openbravo.retail.posterminal module.</p>
- * 
- * <h2>Architecture</h2>
- * <p>This implementation follows the MasterDataWebService + Model pattern:</p>
- * <ul>
- *   <li>Native SQL queries (no HQL mapping overhead)</li>
- *   <li>Dynamic column selection via selectList parameter</li>
- *   <li>Single order retrieval by orderId</li>
- * </ul>
- * 
- * <h2>Endpoint</h2>
- * <pre>GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrder</pre>
- * 
- * <h2>Required Parameters</h2>
- * <ul>
- *   <li><b>client</b>: Client UUID</li>
- *   <li><b>organization</b>: Organization UUID</li>
- *   <li><b>orderId</b>: Order UUID (c_order_id)</li>
- *   <li><b>selectList</b>: SQL SELECT columns (URL-encoded)</li>
- * </ul>
- * 
- * <h2>Optional Parameters</h2>
- * <ul>
- *   <li><b>documentNo</b>: Alternative to orderId - find order by document number</li>
- * </ul>
- * 
- * <h2>Example Request</h2>
- * <pre>
- * GET /ws/com.doceleguas.pos.webservices.GetOrder
- *   ?client=757D621ABD1948F5BCBAD91F19BB70AC
- *   &amp;organization=594C60A9C1154300AEB808C117437D7F
- *   &amp;orderId=AC2661DED5E1EEA353FD72885A7EA1AC
- *   &amp;selectList=ord.c_order_id+as+"id",ord.documentno+as+"documentNo",ord.grandtotal+as+"total"
- * </pre>
- * 
- * <h2>Response Format</h2>
- * <pre>
- * {
- *   "success": true,
- *   "data": {
- *     "id": "AC2661DED5E1EEA353FD72885A7EA1AC",
- *     "documentNo": "VBS2-0000039",
- *     "total": 81.11
- *   }
- * }
- * </pre>
+ * org.openbravo.retail.posterminal module.
  * 
  * @see GetOrdersFilter For querying multiple orders with filters
  * @see OrderModel The native SQL query builder for single order

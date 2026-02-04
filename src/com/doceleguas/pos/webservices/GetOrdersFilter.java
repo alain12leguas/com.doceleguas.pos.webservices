@@ -29,83 +29,9 @@ import com.doceleguas.pos.webservices.orders.OrdersFilterModel;
 /**
  * WebService endpoint for querying Orders using Native SQL queries.
  * 
- * <p>This service provides a REST API for retrieving order data using a flexible,
+ * This service provides a REST API for retrieving order data using a flexible,
  * dynamic approach similar to MasterDataWebService. It executes native SQL queries
- * against the C_Order table with dynamic column selection and filtering.</p>
- * 
- * <h2>Architecture</h2>
- * <p>This implementation follows the MasterDataWebService + Model pattern, providing:</p>
- * <ul>
- *   <li>Native SQL queries (no HQL mapping overhead)</li>
- *   <li>Dynamic column selection via selectList parameter</li>
- *   <li>Dynamic filtering via f.{column}={value} parameters</li>
- *   <li>Native pagination with limit and offset</li>
- *   <li>Simplified filter syntax (no operators in URL)</li>
- * </ul>
- * 
- * <h2>Endpoint</h2>
- * <pre>GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter</pre>
- * 
- * <h2>Required Parameters</h2>
- * <ul>
- *   <li><b>client</b>: Client UUID</li>
- *   <li><b>organization</b>: Organization UUID</li>
- *   <li><b>selectList</b>: SQL SELECT columns (URL-encoded)</li>
- * </ul>
- * 
- * <h2>Filter Syntax</h2>
- * <p>Filters use the prefix <code>f.</code> followed by the SQL column name:</p>
- * <pre>f.{column}={value}</pre>
- * 
- * <h3>Filter Behavior</h3>
- * <ul>
- *   <li><b>documentno</b>: Uses ILIKE (case-insensitive contains search)</li>
- *   <li><b>All other columns</b>: Uses = (equals)</li>
- * </ul>
- * 
- * <h2>Available Filter Columns</h2>
- * <table border="1">
- *   <tr><th>Filter</th><th>SQL Column</th><th>Description</th></tr>
- *   <tr><td>f.c_order_id</td><td>ord.c_order_id</td><td>Order UUID</td></tr>
- *   <tr><td>f.documentno</td><td>ord.documentno</td><td>Document number (ILIKE)</td></tr>
- *   <tr><td>f.ad_org_id</td><td>ord.ad_org_id</td><td>Organization UUID</td></tr>
- *   <tr><td>f.c_bpartner_id</td><td>ord.c_bpartner_id</td><td>Business Partner UUID</td></tr>
- *   <tr><td>f.dateordered</td><td>ord.dateordered</td><td>Order date (YYYY-MM-DD)</td></tr>
- *   <tr><td>f.datefrom</td><td>ord.dateordered</td><td>Date range start</td></tr>
- *   <tr><td>f.dateto</td><td>ord.dateordered</td><td>Date range end</td></tr>
- *   <tr><td>f.ordertype</td><td>(special)</td><td>Order type: ORD, RET, LAY, etc.</td></tr>
- * </table>
- * 
- * <h2>Optional Parameters</h2>
- * <ul>
- *   <li><b>limit</b>: Maximum number of results (default: 1000)</li>
- *   <li><b>offset</b>: Offset for pagination (default: 0)</li>
- *   <li><b>orderBy</b>: ORDER BY clause (default: ord.created DESC)</li>
- * </ul>
- * 
- * <h2>Example Request</h2>
- * <pre>
- * GET /ws/com.doceleguas.pos.webservices.GetOrdersFilter
- *   ?client=757D621ABD1948F5BCBAD91F19BB70AC
- *   &amp;organization=594C60A9C1154300AEB808C117437D7F
- *   &amp;selectList=ord.c_order_id+as+"id",ord.documentno+as+"documentNo",ord.dateordered+as+"orderDate"
- *   &amp;f.documentno=VBS2
- *   &amp;f.ordertype=ORD
- *   &amp;limit=50
- *   &amp;offset=0
- * </pre>
- * 
- * <h2>Response Format</h2>
- * <pre>
- * {
- *   "success": true,
- *   "data": [
- *     {"id": "ABC123...", "documentNo": "VBS2-0001", "orderDate": "2025-01-15"},
- *     ...
- *   ],
- *   "totalRows": 50
- * }
- * </pre>
+ * against the C_Order table with dynamic column selection and filtering.
  * 
  * @see OrdersFilterModel The native SQL query builder
  */
