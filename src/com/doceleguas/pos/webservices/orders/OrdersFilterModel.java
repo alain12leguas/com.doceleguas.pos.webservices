@@ -120,7 +120,7 @@ public class OrdersFilterModel extends Model {
     sql.append(" LEFT JOIN ad_user salesrep ON ord.salesrep_id = salesrep.ad_user_id");
     sql.append(" LEFT JOIN c_doctype doctype ON ord.c_doctypetarget_id = doctype.c_doctype_id");
     sql.append(" WHERE ord.ad_client_id = :clientId");
-    sql.append(" AND ord.ad_org_id IN (SELECT ad_org_id FROM ad_org WHERE ad_org_id = :organizationId OR ad_tree_org IS NOT NULL)");
+    sql.append(" AND ord.ad_org_id IN (SELECT ad_org_id FROM ad_org WHERE ad_org_id = :organizationId)");
     sql.append(" AND ord.em_obpos_isdeleted = 'N'");
     sql.append(" AND ord.em_obpos_applications_id IS NOT NULL");
     sql.append(" AND ord.docstatus NOT IN ('CJ', 'CA', 'NC', 'AE', 'ME')");
