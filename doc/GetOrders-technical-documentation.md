@@ -4,6 +4,8 @@
 
 El WebService `GetOrders` permite consultar órdenes del sistema POS utilizando el patrón arquitectónico **ProcessHQLQueryValidated**, el mismo patrón utilizado por `PaidReceiptsFilter` en el módulo `org.openbravo.retail.posterminal`.
 
+Esta implementación soporta **filtros dinámicos** similares a PaidReceiptsFilter, permitiendo combinar cualquier propiedad de filtro con diferentes operadores.
+
 ---
 
 ## Arquitectura del Código
@@ -12,26 +14,27 @@ La implementación consiste en **3 clases** principales:
 
 ```
 com.doceleguas.pos.webservices/
-├── GetOrders.java                          (~420 líneas) - WebService wrapper HTTP → JSON
+├── GetOrders.java                          (~400 líneas) - WebService wrapper HTTP → JSON
 └── orders/
-    ├── GetOrdersFilter.java                (~180 líneas) - Extiende ProcessHQLQueryValidated
-    └── GetOrdersFilterProperties.java      (~140 líneas) - Define propiedades HQL extensibles
+    ├── GetOrdersFilter.java                (~250 líneas) - Extiende ProcessHQLQueryValidated
+    └── GetOrdersFilterProperties.java      (~120 líneas) - Define propiedades HQL extensibles
 ```
 
 ### Descripción de cada clase
 
 | Clase | Responsabilidad |
 |-------|-----------------|
-| `GetOrders` | WebService HTTP que traduce parámetros GET a formato JSON para ProcessHQLQuery |
+| `GetOrders` | WebService HTTP que traduce parámetros GET dinámicos a formato JSON para ProcessHQLQuery |
 | `GetOrdersFilter` | Extiende `ProcessHQLQueryValidated`, genera query HQL, ejecuta contra BD |
 | `GetOrdersFilterProperties` | Define las propiedades HQL devueltas, extensible via CDI |
 
 ### Beneficios de esta arquitectura
 
 - **Acceso directo a BD**: Elimina la latencia HTTP del proxy anterior
+- **Filtros dinámicos**: Combina cualquier propiedad de filtro con operadores flexibles
 - **Extensible via CDI**: Nuevas propiedades sin modificar código base
 - **Testeable**: Puede mockearse el DAL para tests unitarios
-- **Consistente**: Mismo patrón que otros endpoints Mobile Core
+- **Consistente**: Mismo patrón que PaidReceiptsFilter y otros endpoints Mobile Core
 
 ---
 
@@ -47,10 +50,10 @@ com.doceleguas.pos.webservices/
                               │                              │
                               ▼                              ▼
                     ┌─────────────────┐           ┌──────────────────────┐
-                    │ Traduce params  │           │ Ejecuta HQL directo  │
-                    │ HTTP → JSON     │           │ contra la BD         │
-                    └─────────────────┘           └──────────────────────┘
-                                                            │
+                    │ Parsea filtros  │           │ Ejecuta HQL directo  │
+                    │ dinámicos GET   │           │ contra la BD         │
+                    │ → remoteFilters │           └──────────────────────┘
+                    └─────────────────┘                     │
                                                             ▼
                                                   ┌──────────────────────┐
                                                   │ GetOrdersFilter-     │
@@ -67,11 +70,12 @@ com.doceleguas.pos.webservices/
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                              GetOrders WebService                         │
 ├──────────────────────────────────────────────────────────────────────────┤
-│  1. Recibe request HTTP GET con parámetros de filtro                     │
+│  1. Recibe request HTTP GET con parámetros de filtro dinámicos           │
 │                                                                          │
-│  2. buildJsonRequest() traduce params HTTP → JSON ProcessHQLQuery:       │
+│  2. buildJsonRequest() parsea filtros dinámicos → JSON ProcessHQLQuery:  │
 │     - Extrae client/organization de OBContext                            │
-│     - Construye remoteFilters según tipo de filtro                       │
+│     - Itera parámetros, detecta propiedades de filtro                    │
+│     - Aplica modificadores _op y _isId                                   │
 │     - Añade _limit, _offset, orderByClause                               │
 │                                                                          │
 │  3. Obtiene instancia GetOrdersFilter via CDI:                           │
@@ -79,7 +83,7 @@ com.doceleguas.pos.webservices/
 │                                                                          │
 │  4. Ejecuta filter.exec(writer, jsonRequest)                             │
 │     - GetOrdersFilter genera HQL desde propiedades                       │
-│     - Aplica filtros remotos                                             │
+│     - SimpleQueryBuilder aplica filtros con operadores                   │
 │     - Ejecuta query contra BD                                            │
 │                                                                          │
 │  5. Retorna respuesta JSON al cliente                                    │
@@ -95,51 +99,104 @@ com.doceleguas.pos.webservices/
 GET /ws/com.doceleguas.pos.webservices.GetOrders
 ```
 
-### Parámetros de Entrada
+### Sintaxis de Filtros Dinámicos
 
-| Parámetro | Tipo | Obligatorio | Descripción |
-|-----------|------|-------------|-------------|
-| `filter` | String | **Sí** | Tipo de filtro: `byId`, `byDocumentNo`, `byOrgOrderDate`, `byOrgOrderDateRange` |
-| `limit` | Integer | No | Límite de resultados (default: sin límite) |
-| `offset` | Integer | No | Offset para paginación (default: 0) |
-| `orderBy` | String | No | Ordenamiento (default: `ord.creationDate desc`) |
+Los filtros usan una sintaxis simple basada en parámetros GET:
 
-### Parámetros por Tipo de Filtro
+| Patrón | Descripción | Ejemplo |
+|--------|-------------|---------|
+| `{propiedad}={valor}` | Valor del filtro | `documentNo=VBS2` |
+| `{propiedad}_op={operador}` | Operador a usar (opcional) | `documentNo_op=equals` |
+| `{propiedad}_isId=true` | Indica que el valor es un UUID | `id_isId=true` |
 
-#### `byId` - Filtrar por ID de Orden
+### Operadores Válidos
+
+Los operadores son procesados por `SimpleQueryBuilder`:
+
+| Operador | SQL Generado | Uso Típico |
+|----------|--------------|------------|
+| `equals` | `= value` | IDs, valores exactos |
+| `notEquals` | `<> value` | Exclusiones |
+| `greaterThan` | `> value` | Comparaciones numéricas |
+| `lessThan` | `< value` | Comparaciones numéricas |
+| `startsWith` | `LIKE 'value%'` | Búsquedas por prefijo |
+| `contains` | `LIKE '%value%'` | Búsquedas parciales (default) |
+
+> **Nota**: El operador por defecto es `contains` para texto y `equals` cuando `_isId=true`.
+
+### Propiedades de Filtro Soportadas
+
+| Propiedad | Tipo | Descripción |
+|-----------|------|-------------|
+| `id` | UUID | ID de la orden (usar con `_isId=true`) |
+| `documentNo` | String | Número de documento |
+| `organization` | UUID | ID de organización (usar con `_isId=true`) |
+| `orgSearchKey` | String | Código de organización (ej: "E101") |
+| `orgName` | String | Nombre de organización |
+| `businessPartner` | UUID | ID del cliente (usar con `_isId=true`) |
+| `orderType` | String | Tipo de orden: `ORD`, `RET`, `LAY`, `QT`, `verifiedReturns`, `payOpenTickets` |
+| `totalamount` | Decimal | Monto total |
+
+### Filtros de Fecha (Manejo Especial)
+
+Las fechas se pasan como parámetros y se manejan en la cláusula WHERE del HQL:
+
+| Parámetro | Formato | Descripción |
+|-----------|---------|-------------|
+| `orderDate` | YYYY-MM-DD | Fecha exacta |
+| `dateFrom` | YYYY-MM-DD | Inicio de rango (usar con `dateTo`) |
+| `dateTo` | YYYY-MM-DD | Fin de rango (usar con `dateFrom`) |
+
+### Parámetros Reservados
+
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| `_limit` (o `limit`) | Integer | Máximo de resultados |
+| `_offset` (o `offset`) | Integer | Offset para paginación |
+| `orderBy` | String | Ordenamiento (default: `ord.creationDate desc`) |
+
+---
+
+## Ejemplos de Uso
+
+### Buscar por número de documento (búsqueda parcial)
 ```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byId&id=ABC123
+GET /ws/com.doceleguas.pos.webservices.GetOrders?documentNo=VBS2
 ```
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `id` | Sí | UUID de la orden |
+Genera filtro: `documentNo LIKE '%VBS2%'`
 
-#### `byDocumentNo` - Filtrar por Número de Documento
+### Buscar por número de documento exacto
 ```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byDocumentNo&documentNo=ORD-001
+GET /ws/com.doceleguas.pos.webservices.GetOrders?documentNo=VBS2-001&documentNo_op=equals
 ```
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `documentNo` | Sí | Número de documento (búsqueda parcial, case-insensitive) |
+Genera filtro: `documentNo = 'VBS2-001'`
 
-#### `byOrgOrderDate` - Filtrar por Organización y Fecha
+### Buscar por ID de orden (UUID)
 ```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDate&organization=STORE1&orderDate=2025-01-15
+GET /ws/com.doceleguas.pos.webservices.GetOrders?id=ABC-123&id_isId=true
 ```
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `organization` | Sí | Nombre de organización (búsqueda parcial) |
-| `orderDate` | Sí | Fecha de orden (formato: YYYY-MM-DD) |
+Genera filtro: `id = 'ABC-123'`
 
-#### `byOrgOrderDateRange` - Filtrar por Rango de Fechas
+### Buscar por organización y rango de fechas
 ```http
-GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDateRange&organization=STORE1&dateFrom=2025-01-01&dateTo=2025-01-31&limit=100
+GET /ws/com.doceleguas.pos.webservices.GetOrders?orgSearchKey=E101&dateFrom=2025-01-01&dateTo=2025-12-31
 ```
-| Parámetro | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `organization` | Sí | Nombre de organización |
-| `dateFrom` | Sí | Fecha desde (YYYY-MM-DD) |
-| `dateTo` | Sí | Fecha hasta (YYYY-MM-DD) |
+Genera filtros:
+- `orgSearchKey LIKE '%E101%'`
+- `orderDate >= '2025-01-01' AND orderDate <= '2025-12-31'`
+
+### Combinar múltiples filtros con paginación
+```http
+GET /ws/com.doceleguas.pos.webservices.GetOrders?orderType=ORD&orgSearchKey=E101&_limit=50&_offset=0
+```
+
+### Filtrar órdenes por monto mínimo
+```http
+GET /ws/com.doceleguas.pos.webservices.GetOrders?totalamount=100&totalamount_op=greaterThan&orgSearchKey=E101
+```
+Genera filtros:
+- `totalamount > 100`
+- `orgSearchKey LIKE '%E101%'`
 
 ---
 
@@ -153,41 +210,19 @@ GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDateRange&orga
   "data": [
     {
       "id": "AC2661DED5E1EEA353FD72885A7EA1AC",
-      "documentNo": "AUTBE0504P99-0000039",
+      "documentNo": "VBS2-0000039",
       "orderDate": "2025-11-17",
-      "creationDate": "2025-11-17 18:14:02",
-      "updated": "2025-11-17 18:14:02",
-      "grossAmount": 81.11,
-      "netAmount": 67.03,
+      "creationDate": "2025-11-17T18:14:02",
       "documentStatus": "CO",
-      "isCancelled": false,
-      "isLayaway": false,
-      "isSalesTransaction": true,
-      "organizationId": "610BDE28B0AF4D4685FC9B475B635591",
-      "organization": "AUTO 5 BIERGES",
-      "organizationSearchKey": "0504",
-      "terminalId": "3D3E84F1127F4FB78084D8C645791E20",
-      "terminal": "0504099",
-      "terminalName": "Terminal 099",
-      "businessPartnerId": "BPID123...",
-      "businessPartner": "CUST001",
+      "iscancelled": false,
+      "organization": "ABC123...",
+      "orgSearchKey": "E101",
+      "orgName": "Tienda Centro",
+      "businessPartner": "BPID123...",
       "businessPartnerName": "Cliente Ejemplo",
-      "documentTypeId": "DTID123...",
-      "documentType": "POS Order",
-      "isReturn": false,
-      "documentSubType": null,
-      "currencyId": "102",
-      "currency": "EUR",
-      "priceIncludesTax": true,
-      "priceListId": "PLID123...",
-      "priceList": "Tarif Ventes",
-      "warehouseId": "WHID123...",
-      "warehouse": "AUTO 5 BIERGES",
-      "salesRepresentativeId": "USERID123...",
-      "salesRepresentative": "POS User",
-      "description": null,
-      "orderReference": null,
-      "externalReference": null
+      "totalamount": 81.11,
+      "orderType": "ORD",
+      "isAnonymousCustomerSale": false
     }
   ],
   "totalRows": 1
@@ -200,7 +235,18 @@ GET /ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDateRange&orga
 {
   "success": false,
   "error": true,
-  "message": "Missing required parameter: 'filter'. Valid values: byId, byDocumentNo, byOrgOrderDate, byOrgOrderDateRange",
+  "message": "At least one filter parameter is required. Supported filters: [id, documentNo, ...], [orderDate, dateFrom, dateTo]",
+  "statusCode": 400
+}
+```
+
+### Error por Operador Inválido
+
+```json
+{
+  "success": false,
+  "error": true,
+  "message": "Invalid operator 'iContains' for property 'documentNo'. Valid operators: [equals, notEquals, greaterThan, lessThan, startsWith, contains]",
   "statusCode": 400
 }
 ```
@@ -215,17 +261,16 @@ Las propiedades son definidas en `GetOrdersFilterProperties` y son extensibles v
 
 | Categoría | Propiedades |
 |-----------|-------------|
-| **Core** | id, documentNo, orderDate, creationDate, updated |
-| **Montos** | grossAmount, netAmount |
-| **Estado** | documentStatus, isCancelled, isLayaway, isSalesTransaction |
-| **Organización** | organizationId, organization, organizationSearchKey |
-| **Terminal** | terminalId, terminal, terminalName |
-| **Cliente** | businessPartnerId, businessPartner, businessPartnerName |
-| **Documento** | documentTypeId, documentType, isReturn, documentSubType |
-| **Moneda** | currencyId, currency, priceIncludesTax, priceListId, priceList |
-| **Almacén** | warehouseId, warehouse |
-| **Vendedor** | salesRepresentativeId, salesRepresentative |
-| **Otros** | description, orderReference, externalReference |
+| **Core** | id, documentNo, orderDate, creationDate |
+| **Montos** | totalamount |
+| **Estado** | documentStatus, iscancelled |
+| **Organización** | organization (UUID), orgSearchKey, orgName |
+| **Org. Transacción** | trxOrganization (UUID), trxOrganizationName |
+| **Cliente** | businessPartner (UUID), businessPartnerName |
+| **Documento** | documentTypeId, orderType |
+| **Entrega** | isdelivered, deliveryMode, deliveryDate, externalBusinessPartnerReference |
+| **Facturación** | invoiceTerms, fullInvoice |
+| **Otros** | isAnonymousCustomerSale |
 
 ---
 
@@ -273,8 +318,10 @@ Las nuevas propiedades serán automáticamente incluidas en la respuesta.
 ### GetOrders.java (WebService Wrapper)
 
 **Responsabilidades:**
-- Recibir peticiones HTTP GET
-- Validar parámetro `filter` obligatorio
+- Recibir peticiones HTTP GET con filtros dinámicos
+- Parsear parámetros y detectar propiedades de filtro
+- Aplicar modificadores `_op` y `_isId`
+- Validar operadores
 - Traducir parámetros HTTP a formato JSON/remoteFilters
 - Obtener `GetOrdersFilter` via CDI
 - Manejar paginación y ordenamiento
@@ -282,10 +329,15 @@ Las nuevas propiedades serán automáticamente incluidas en la respuesta.
 
 **Métodos principales:**
 - `doGet()`: Entry point del WebService
-- `buildJsonRequest()`: Construye JSON desde parámetros HTTP
-- `buildRemoteFilter()`: Crea objetos de filtro remoto
+- `buildJsonRequest()`: Parsea filtros dinámicos y construye JSON
+- `buildRemoteFilter()`: Crea objetos de filtro remoto con isId
 - `sanitizeOrderBy()`: Previene SQL injection en ordenamiento
 - `sendErrorResponse()`: Respuestas de error estandarizadas
+
+**Constantes importantes:**
+- `FILTER_PROPERTIES`: Propiedades de filtro soportadas
+- `DATE_PROPERTIES`: Propiedades de fecha (manejo especial)
+- `VALID_OPERATORS`: Operadores válidos de SimpleQueryBuilder
 
 ### GetOrdersFilter.java (Filtro HQL)
 
@@ -293,30 +345,25 @@ Las nuevas propiedades serán automáticamente incluidas en la respuesta.
 
 **Responsabilidades:**
 - Generar query HQL dinámicamente
-- Aplicar filtros remotos
+- Aplicar filtros remotos via SimpleQueryBuilder
 - Validar que existan filtros relevantes
-- Manejar parámetros de fecha
+- Manejar parámetros de fecha en WHERE clause
 
 **Métodos principales:**
 - `getQueryValidated()`: Genera el HQL completo
 - `getHqlProperties()`: Obtiene propiedades desde extensiones CDI
 - `hasRelevantRemoteFilters()`: Valida filtros obligatorios
-- `addCustomWhereClause()`: Añade cláusulas WHERE personalizadas
+- `addCustomWhereClause()`: Añade cláusulas WHERE para fechas
+- `getParameterValues()`: Convierte strings de fecha a java.sql.Date
 
-**Query HQL generado:**
+**JOINs utilizados:**
 ```sql
-SELECT {propiedades}
-FROM Order AS ord
-LEFT JOIN ord.obposApplications AS pos
+LEFT JOIN ord.obposApplications AS obpos
+LEFT JOIN ord.organization AS org
+LEFT JOIN obpos.organization AS trxOrg
 LEFT JOIN ord.businessPartner AS bp
 LEFT JOIN ord.salesRepresentative AS salesRep
 LEFT JOIN ord.documentType AS docType
-WHERE $filtersCriteria
-  AND $hqlCriteria
-  AND ord.client.id = $clientId
-  AND ord.$orgId
-  AND ord.obposIsDeleted = false
-$orderByCriteria
 ```
 
 ### GetOrdersFilterProperties.java (Propiedades)
@@ -326,22 +373,22 @@ $orderByCriteria
 **Qualifier CDI:** `GetOrdersFilter_Extension`
 
 **Responsabilidades:**
-- Definir las 30+ propiedades HQL base
+- Definir las propiedades HQL base
 - Mapear expresiones HQL a nombres JSON
+- Generar lógica dinámica para orderType
 
 ---
 
-## Comparación con la Implementación Anterior
+## Comparación con PaidReceiptsFilter
 
-| Aspecto | Antes (HTTP Proxy) | Ahora (ProcessHQLQueryValidated) |
-|---------|-------------------|----------------------------------|
-| **Latencia** | +50-200ms (HTTP interno) | Sin overhead HTTP |
-| **Extensibilidad** | Ninguna | Via CDI/ModelExtension |
-| **Testabilidad** | Solo integración | Unit tests posibles |
-| **Mantenimiento** | Dependía de ExportService | Autónomo |
-| **Consistencia** | Diferente a otros endpoints | Igual que PaidReceiptsFilter |
-| **Paginación** | Manual | Nativa (`_limit`, `_offset`) |
-| **Ordenamiento** | No soportado | Nativo (`orderByClause`) |
+| Aspecto | PaidReceiptsFilter | GetOrders |
+|---------|-------------------|-----------|
+| **Método HTTP** | POST con JSON body | GET con parámetros URL |
+| **Formato filtros** | `remoteFilters` en JSON | Parámetros dinámicos `{prop}={val}&{prop}_op={op}` |
+| **Manejo fechas** | remoteFilters directos | Parámetros → WHERE clause |
+| **Operadores** | Todos los de SimpleQueryBuilder | Los mismos, con validación explícita |
+| **Patrón base** | ProcessHQLQueryValidated | ProcessHQLQueryValidated |
+| **Extensibilidad** | CDI/ModelExtension | CDI/ModelExtension |
 
 ---
 
@@ -353,28 +400,40 @@ El módulo requiere:
 
 ---
 
-## Ejemplos de Uso
+## Ejemplos de Uso (curl)
 
-### Buscar orden por ID
+### Buscar por número de documento (parcial)
 ```bash
 curl -u admin:admin \
-  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?filter=byId&id=AC2661DED5E1EEA353FD72885A7EA1AC"
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?documentNo=VBS2"
 ```
 
-### Buscar por número de documento
+### Buscar por número de documento exacto
 ```bash
 curl -u admin:admin \
-  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?filter=byDocumentNo&documentNo=VBS2/0000"
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?documentNo=VBS2-001&documentNo_op=equals"
+```
+
+### Buscar por ID de orden (UUID)
+```bash
+curl -u admin:admin \
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?id=AC2661DED5E1EEA353FD72885A7EA1AC&id_isId=true"
 ```
 
 ### Buscar por organización y rango de fechas con paginación
 ```bash
 curl -u admin:admin \
-  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?filter=byOrgOrderDateRange&organization=AUTO%205&dateFrom=2025-01-01&dateTo=2025-12-31&limit=50&offset=0"
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?orgSearchKey=E101&dateFrom=2025-01-01&dateTo=2025-12-31&_limit=50&_offset=0"
+```
+
+### Buscar órdenes por tipo con organización
+```bash
+curl -u admin:admin \
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrders?orderType=ORD&orgSearchKey=E101"
 ```
 
 ---
 
 *Documentación actualizada: 2026-02-03*
-*Versión: 1.0*
+*Versión: 2.0 - Filtros Dinámicos*
 

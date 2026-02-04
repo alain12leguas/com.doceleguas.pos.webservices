@@ -11,40 +11,16 @@ import java.util.List;
 
 import javax.enterprise.context.ApplicationScoped;
 
+import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.client.kernel.ComponentProvider.Qualifier;
 import org.openbravo.mobile.core.model.HQLProperty;
 import org.openbravo.mobile.core.model.ModelExtension;
 
 /**
- * Defines the HQL properties for the order filter query.
+ * Defines the HQL properties for GetOrdersFilter query.
  * 
- * This class provides the base set of properties returned by GetOrdersFilter.
- * Other modules can extend this by creating additional classes annotated with
- * {@code @Qualifier(GetOrdersFilter.EXTENSION_QUALIFIER)}.
- * 
- * Properties are mapped from HQL expressions to JSON field names using
- * the HQLProperty class.
- * 
- * Example extension in another module:
- * <pre>
- * {@code
- * @ApplicationScoped
- * @Qualifier(GetOrdersFilter.EXTENSION_QUALIFIER)
- * public class CustomOrderProperties extends ModelExtension {
- *   @Override
- *   public List<HQLProperty> getHQLProperties(Object params) {
- *     List<HQLProperty> props = new ArrayList<>();
- *     props.add(new HQLProperty("ord.myCustomField", "customField"));
- *     return props;
- *   }
- *   
- *   @Override
- *   public int getPriority() {
- *     return 100; // Execute after default properties
- *   }
- * }
- * }
- * </pre>
+ * Properties are compatible with PaidReceiptsFilter response format.
+ * Extensible via CDI with {@code @Qualifier(GetOrdersFilter.EXTENSION_QUALIFIER)}.
  * 
  * @see GetOrdersFilter
  */
@@ -54,93 +30,88 @@ public class GetOrdersFilterProperties extends ModelExtension {
 
   @Override
   public List<HQLProperty> getHQLProperties(Object params) {
-    List<HQLProperty> properties = new ArrayList<>();
+    List<HQLProperty> props = new ArrayList<>();
 
-    // ============================================
-    // Core Order Properties
-    // ============================================
-    properties.add(new HQLProperty("ord.id", "id"));
-    properties.add(new HQLProperty("ord.documentNo", "documentNo"));
-    properties.add(new HQLProperty("ord.orderDate", "orderDate"));
-    properties.add(new HQLProperty("ord.creationDate", "creationDate"));
-    properties.add(new HQLProperty("ord.updated", "updated"));
+    // Core (aligned with PaidReceiptsFilterProperties)
+    props.add(new HQLProperty("ord.id", "id"));
+    props.add(new HQLProperty("docType.id", "documentTypeId"));
+    props.add(new HQLProperty("ord.documentStatus", "documentStatus"));
+    props.add(new HQLProperty("ord.documentNo", "documentNo"));
+    props.add(new HQLProperty("ord.creationDate", "creationDate"));
+    props.add(new HQLProperty("ord.orderDate", "orderDate"));
+    props.add(new HQLProperty("ord.orderDate", "orderDateFrom"));
+    props.add(new HQLProperty("ord.orderDate", "orderDateTo"));
 
-    // ============================================
-    // Amount Properties
-    // ============================================
-    properties.add(new HQLProperty("ord.grandTotalAmount", "grossAmount"));
-    properties.add(new HQLProperty("ord.summedLineAmount", "netAmount"));
+    // Business Partner
+    props.add(new HQLProperty("bp.id", "businessPartner"));
+    props.add(new HQLProperty("bp.name", "businessPartnerName"));
 
-    // ============================================
-    // Status Properties
-    // ============================================
-    properties.add(new HQLProperty("ord.documentStatus", "documentStatus"));
-    properties.add(new HQLProperty("ord.iscancelled", "isCancelled"));
-    properties.add(new HQLProperty("ord.obposIslayaway", "isLayaway"));
-    properties.add(new HQLProperty("ord.salesTransaction", "isSalesTransaction"));
+    // Amounts
+    props.add(new HQLProperty("ord.grandTotalAmount", "totalamount"));
+    props.add(new HQLProperty("ord.grandTotalAmount", "totalamountFrom"));
+    props.add(new HQLProperty("ord.grandTotalAmount", "totalamountTo"));
 
-    // ============================================
-    // Organization Information
-    // ============================================
-    properties.add(new HQLProperty("ord.organization.id", "organizationId"));
-    properties.add(new HQLProperty("ord.organization.name", "organization"));
-    properties.add(new HQLProperty("ord.organization.searchKey", "organizationSearchKey"));
+    // Status
+    props.add(new HQLProperty("ord.iscancelled", "iscancelled"));
 
-    // ============================================
-    // Terminal Information
-    // ============================================
-    properties.add(new HQLProperty("pos.id", "terminalId"));
-    properties.add(new HQLProperty("pos.searchKey", "terminal"));
-    properties.add(new HQLProperty("pos.name", "terminalName"));
+    // Organization (using org alias like PaidReceiptsFilter)
+    props.add(new HQLProperty("org.id", "organization"));
+    props.add(new HQLProperty("org.searchKey", "orgSearchKey"));
+    props.add(new HQLProperty("org.name", "orgName"));
 
-    // ============================================
-    // Business Partner (Customer) Information
-    // ============================================
-    properties.add(new HQLProperty("bp.id", "businessPartnerId"));
-    properties.add(new HQLProperty("bp.searchKey", "businessPartner"));
-    properties.add(new HQLProperty("bp.name", "businessPartnerName"));
+    // Transaction Organization (using trxOrg alias)
+    props.add(new HQLProperty("trxOrg.id", "trxOrganization"));
+    props.add(new HQLProperty("trxOrg.name", "trxOrganizationName"));
 
-    // ============================================
-    // Document Type Information
-    // ============================================
-    properties.add(new HQLProperty("docType.id", "documentTypeId"));
-    properties.add(new HQLProperty("docType.name", "documentType"));
-    properties.add(new HQLProperty("docType.return", "isReturn"));
-    properties.add(new HQLProperty("docType.sOSubType", "documentSubType"));
+    // Delivery
+    props.add(new HQLProperty("ord.delivered", "isdelivered"));
+    props.add(new HQLProperty("ord.externalBusinessPartnerReference", "externalBusinessPartnerReference"));
+    props.add(new HQLProperty(
+        "(select coalesce(max(ol.obrdmDeliveryMode), 'PickAndCarry') from OrderLine ol where ord.id = ol.salesOrder.id and ol.obposIsDeleted = 'N')",
+        "deliveryMode"));
+    props.add(new HQLProperty(
+        "(select min(case when ol.obrdmDeliveryDate is null or ol.obrdmDeliveryTime is null then null else to_timestamp(to_char(ol.obrdmDeliveryDate, 'YYYY') || '-' || to_char(ol.obrdmDeliveryDate, 'MM') || '-' || to_char(ol.obrdmDeliveryDate, 'DD') || ' ' || to_char(ol.obrdmDeliveryTime, 'HH24') || ':' || to_char(ol.obrdmDeliveryTime, 'MI'), 'YYYY-MM-DD HH24:MI') end) from OrderLine ol where ord.id = ol.salesOrder.id)",
+        "deliveryDate"));
 
-    // ============================================
-    // Currency and Price Information
-    // ============================================
-    properties.add(new HQLProperty("ord.currency.id", "currencyId"));
-    properties.add(new HQLProperty("ord.currency.iSOCode", "currency"));
-    properties.add(new HQLProperty("ord.priceIncludesTax", "priceIncludesTax"));
-    properties.add(new HQLProperty("ord.priceList.id", "priceListId"));
-    properties.add(new HQLProperty("ord.priceList.name", "priceList"));
+    // OrderType (dynamic calculation like PaidReceiptsFilter)
+    props.add(new HQLProperty(getOrderTypeHql(params), "orderType"));
 
-    // ============================================
-    // Warehouse Information
-    // ============================================
-    properties.add(new HQLProperty("ord.warehouse.id", "warehouseId"));
-    properties.add(new HQLProperty("ord.warehouse.name", "warehouse"));
+    // Invoice
+    props.add(new HQLProperty("ord.invoiceTerms", "invoiceTerms"));
 
-    // ============================================
-    // Sales Representative
-    // ============================================
-    properties.add(new HQLProperty("salesRep.id", "salesRepresentativeId"));
-    properties.add(new HQLProperty("salesRep.name", "salesRepresentative"));
+    // Anonymous customer detection (same logic as PaidReceiptsFilter)
+    props.add(new HQLProperty(
+        "(case when ord.externalBusinessPartnerReference is not null then false "
+            + "when (obpos.defaultCustomer is not null and obpos.defaultCustomer.id = bp.id) then true "
+            + "when (org.obretcoCBpartner is not null and org.obretcoCBpartner.id = bp.id) then true "
+            + "else false end)",
+        "isAnonymousCustomerSale"));
 
-    // ============================================
-    // Additional Order Properties
-    // ============================================
-    properties.add(new HQLProperty("ord.description", "description"));
-    properties.add(new HQLProperty("ord.orderReference", "orderReference"));
-    properties.add(new HQLProperty("ord.externalBusinessPartnerReference", "externalReference"));
-
-    return properties;
+    return props;
   }
 
-  public int getPriority() {
-    // Default priority, other extensions can use higher values to add after
-    return 0;
+  /**
+   * Generates orderType HQL expression with dynamic CASE WHEN logic.
+   * Compatible with PaidReceiptsFilter behavior.
+   */
+  protected String getOrderTypeHql(Object params) {
+    String orderType = "";
+    if (params instanceof JSONObject) {
+      orderType = GetOrdersFilter.getFilterValue((JSONObject) params, "orderType");
+    }
+    switch (orderType) {
+      case "ORD":
+        return "to_char('ORD')";
+      case "LAY":
+        return "to_char('LAY')";
+      case "QT":
+        return "to_char('QT')";
+      case "RET":
+        return "to_char('RET')";
+      default:
+        return "(case when ord.documentType.return = true then 'RET'"
+            + " when ord.documentType.sOSubType = 'OB' then 'QT'"
+            + " when ord.obposIslayaway = true then 'LAY' else 'ORD' end)";
+    }
   }
 }

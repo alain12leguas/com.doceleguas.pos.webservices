@@ -83,24 +83,78 @@ public class GetOrdersFilter extends ProcessHQLQueryValidated {
     HQLPropertyList orderProperties = ModelExtensionUtils.getPropertyExtensions(extensions,
         jsonsent);
 
+    String orderTypeHql = getOrderTypeHql(jsonsent);
+    boolean isPayOpenTicket = "payOpenTickets".equals(getFilterValue(jsonsent, "orderType"));
+
     StringBuilder hql = new StringBuilder();
     hql.append("SELECT ").append(orderProperties.getHqlSelect());
     hql.append(" FROM Order AS ord");
-    hql.append(" LEFT JOIN ord.obposApplications AS pos");
+    hql.append(" LEFT JOIN ord.obposApplications AS obpos");
+    hql.append(" LEFT JOIN ord.organization AS org");
+    hql.append(" LEFT JOIN obpos.organization AS trxOrg");
     hql.append(" LEFT JOIN ord.businessPartner AS bp");
     hql.append(" LEFT JOIN ord.salesRepresentative AS salesRep");
     hql.append(" LEFT JOIN ord.documentType AS docType");
-    hql.append(" WHERE $filtersCriteria");
-    hql.append(" AND $hqlCriteria");
+    hql.append(" WHERE $filtersCriteria AND $hqlCriteria");
+    hql.append(orderTypeHql);
     hql.append(" AND ord.client.id = $clientId");
     hql.append(" AND ord.$orgId");
     hql.append(" AND ord.obposIsDeleted = false");
+    hql.append(" AND ord.obposApplications IS NOT NULL");
+    hql.append(" AND ord.documentStatus NOT IN ('CJ', 'CA', 'NC', 'AE', 'ME')");
+    if (!isPayOpenTicket) {
+      hql.append(" AND (ord.documentStatus <> 'CL' OR ord.iscancelled = true)");
+    }
     hql.append(addCustomWhereClause(jsonsent));
     hql.append(" $orderByCriteria");
 
     log.debug("GetOrdersFilter HQL: {}", hql.toString());
 
     return Arrays.asList(hql.toString());
+  }
+
+  /**
+   * Generates the orderType-specific WHERE clause.
+   */
+  private String getOrderTypeHql(JSONObject jsonsent) {
+    String orderType = getFilterValue(jsonsent, "orderType");
+    switch (orderType) {
+      case "RET":
+        return " AND ord.documentType.return = true";
+      case "LAY":
+        return " AND ord.obposIslayaway = true";
+      case "ORD":
+        return " AND ord.documentType.return = false AND ord.documentType.sOSubType <> 'OB' AND ord.obposIslayaway = false";
+      case "verifiedReturns":
+        return " AND ord.documentType.return = false AND ord.documentType.sOSubType <> 'OB' AND ord.obposIslayaway = false AND cancelledorder IS NULL";
+      case "payOpenTickets":
+        return " AND ord.grandTotalAmount > 0 AND ord.documentType.sOSubType <> 'OB' AND ord.documentStatus <> 'CL'";
+      default:
+        return "";
+    }
+  }
+
+  /**
+   * Gets a filter value from remoteFilters by column name.
+   */
+  public static String getFilterValue(JSONObject jsonsent, String column) {
+    try {
+      if (jsonsent.has("remoteFilters")) {
+        JSONArray filters = jsonsent.getJSONArray("remoteFilters");
+        for (int i = 0; i < filters.length(); i++) {
+          JSONObject filter = filters.getJSONObject(i);
+          JSONArray columns = filter.getJSONArray("columns");
+          for (int j = 0; j < columns.length(); j++) {
+            if (column.equals(columns.getString(j))) {
+              return filter.optString("value", "");
+            }
+          }
+        }
+      }
+    } catch (JSONException e) {
+      log.debug("Error getting filter value for column: {}", column);
+    }
+    return "";
   }
 
   /**
@@ -113,9 +167,16 @@ public class GetOrdersFilter extends ProcessHQLQueryValidated {
   protected String addCustomWhereClause(JSONObject jsonsent) throws JSONException {
     StringBuilder where = new StringBuilder();
 
-    // Check for date range filter in parameters
+    // Check for date parameters in parameters object
     if (jsonsent.has("parameters")) {
       JSONObject params = jsonsent.getJSONObject("parameters");
+      
+      // Handle exact date filter
+      if (params.has("orderDate")) {
+        where.append(" AND ord.orderDate = :orderDate");
+      }
+      
+      // Handle date range filter
       if (params.has("dateFrom") && params.has("dateTo")) {
         where.append(" AND ord.orderDate >= :dateFrom AND ord.orderDate <= :dateTo");
       }
@@ -128,9 +189,19 @@ public class GetOrdersFilter extends ProcessHQLQueryValidated {
   protected Map<String, Object> getParameterValues(JSONObject jsonsent) throws JSONException {
     Map<String, Object> params = super.getParameterValues(jsonsent);
 
-    // Add date range parameters if present
+    // Add date parameters if present
     if (jsonsent.has("parameters")) {
       JSONObject jsonParams = jsonsent.getJSONObject("parameters");
+      
+      // Handle exact date parameter
+      if (jsonParams.has("orderDate")) {
+        if (params == null) {
+          params = new java.util.HashMap<>();
+        }
+        params.put("orderDate", java.sql.Date.valueOf(jsonParams.getString("orderDate")));
+      }
+      
+      // Handle date range parameters
       if (jsonParams.has("dateFrom")) {
         if (params == null) {
           params = new java.util.HashMap<>();
@@ -159,19 +230,19 @@ public class GetOrdersFilter extends ProcessHQLQueryValidated {
     return "At least one filter is required (id, documentNo, organization, orderDate, etc.)";
   }
 
+  private static final List<String> SUPPORTED_FILTERS = Arrays.asList(
+      "id", "documentNo", "organization", "orgSearchKey", "orgName",
+      "orderDate", "dateFrom", "dateTo", "businessPartner", "orderType", "totalamount");
+
   @Override
   protected boolean hasRelevantRemoteFilters(JSONArray remoteFilters) {
-    // Check if any of our supported filters are present
     try {
       for (int i = 0; i < remoteFilters.length(); i++) {
         JSONObject filter = remoteFilters.getJSONObject(i);
         if (filter.has("columns")) {
           JSONArray columns = filter.getJSONArray("columns");
           for (int j = 0; j < columns.length(); j++) {
-            String column = columns.getString(j);
-            if ("id".equals(column) || "documentNo".equals(column) || "organization".equals(column)
-                || "orderDate".equals(column) || "dateFrom".equals(column)
-                || "dateTo".equals(column)) {
+            if (SUPPORTED_FILTERS.contains(columns.getString(j))) {
               return true;
             }
           }
