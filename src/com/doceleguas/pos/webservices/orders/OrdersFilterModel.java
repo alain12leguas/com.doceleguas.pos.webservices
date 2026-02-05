@@ -34,6 +34,45 @@ import com.doceleguas.pos.webservices.Model;
 public class OrdersFilterModel extends Model {
 
   private static final Logger log = LogManager.getLogger();
+  
+  // ============================================
+  // Computed Property SQL Expressions
+  // ============================================
+  
+  /**
+   * SQL subquery to calculate deliveryMode from order lines.
+   * Returns the maximum delivery mode, defaulting to 'PickAndCarry'.
+   * Equivalent to PaidReceiptsFilterProperties.deliveryMode
+   */
+  private static final String DELIVERY_MODE_SQL = 
+      "(SELECT COALESCE(MAX(ol.em_obrdm_deliverymode), 'PickAndCarry') "
+      + "FROM c_orderline ol "
+      + "WHERE ol.c_order_id = ord.c_order_id "
+      + "AND COALESCE(ol.em_obpos_isdeleted, 'N') = 'N')";
+  
+  /**
+   * SQL subquery to calculate deliveryDate from order lines.
+   * Returns the minimum combined delivery date/time.
+   * Equivalent to PaidReceiptsFilterProperties.deliveryDate
+   */
+  private static final String DELIVERY_DATE_SQL = 
+      "(SELECT MIN(CASE "
+      + "WHEN ol.em_obrdm_deliverydate IS NULL OR ol.em_obrdm_deliverytime IS NULL THEN NULL "
+      + "ELSE (ol.em_obrdm_deliverydate + ol.em_obrdm_deliverytime) "
+      + "END) "
+      + "FROM c_orderline ol "
+      + "WHERE ol.c_order_id = ord.c_order_id)";
+  
+  /**
+   * SQL CASE expression to determine orderType.
+   * Equivalent to PaidReceiptsFilterProperties.getOrderType() default case.
+   */
+  private static final String ORDER_TYPE_SQL = 
+      "(CASE "
+      + "WHEN doctype.isreturn = 'Y' THEN 'RET' "
+      + "WHEN doctype.docsubtypeso = 'OB' THEN 'QT' "
+      + "WHEN COALESCE(ord.em_obpos_islayaway, 'N') = 'Y' THEN 'LAY' "
+      + "ELSE 'ORD' END)";
 
   @Override
   public String getName() {
@@ -62,6 +101,9 @@ public class OrdersFilterModel extends Model {
   public NativeQuery<?> createQuery(JSONObject jsonParams) throws JSONException {
     // Parse parameters
     String selectList = sanitizeSelectList(jsonParams.getString("selectList"));
+    
+    // Replace computed property aliases with their SQL expressions
+    selectList = replaceComputedProperties(selectList);
     Long limit = jsonParams.optLong("limit", 1000);
     Long offset = jsonParams.optLong("offset", 0);
     String orderBy = jsonParams.optString("orderBy", "ord.created DESC");
@@ -213,6 +255,43 @@ public class OrdersFilterModel extends Model {
     // Remove dangerous keywords
     String regex = "(?i)\\b(update|delete|drop|insert|truncate|alter|exec|execute)\\b";
     return selectList.replaceAll(regex, "").trim().replaceAll(" +", " ");
+  }
+  
+  /**
+   * Replaces computed property aliases with their SQL expressions.
+   * 
+   * <p>This method allows clients to request computed properties using simple aliases
+   * like "@deliveryMode", "@deliveryDate", "@orderType" instead of complex SQL subqueries.
+   * The aliases are replaced with their corresponding SQL expressions before query execution.</p>
+   * 
+   * <p>Supported computed properties:</p>
+   * <ul>
+   *   <li>{@code @deliveryMode} - Maximum delivery mode from order lines (default: 'PickAndCarry')</li>
+   *   <li>{@code @deliveryDate} - Minimum delivery date/time from order lines</li>
+   *   <li>{@code @orderType} - Calculated order type: 'ORD', 'RET', 'LAY', or 'QT'</li>
+   * </ul>
+   * 
+   * <p>Example selectList:</p>
+   * <pre>
+   * ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode"
+   * </pre>
+   * 
+   * @param selectList The SELECT list potentially containing computed property aliases
+   * @return The SELECT list with aliases replaced by SQL expressions
+   */
+  private String replaceComputedProperties(String selectList) {
+    String result = selectList;
+    
+    // Replace @deliveryMode with the subquery
+    result = result.replaceAll("(?i)@deliveryMode", DELIVERY_MODE_SQL);
+    
+    // Replace @deliveryDate with the subquery
+    result = result.replaceAll("(?i)@deliveryDate", DELIVERY_DATE_SQL);
+    
+    // Replace @orderType with the CASE expression
+    result = result.replaceAll("(?i)@orderType", ORDER_TYPE_SQL);
+    
+    return result;
   }
   
   /**

@@ -22,7 +22,7 @@ com.doceleguas.pos.webservices/
 ├── GetOrdersFilter.java                    (~367 líneas) - WebService para múltiples órdenes
 ├── GetOrder.java                           (~275 líneas) - WebService para una orden
 └── orders/
-    ├── OrdersFilterModel.java              (~267 líneas) - Model para GetOrdersFilter
+    ├── OrdersFilterModel.java              (~347 líneas) - Model para GetOrdersFilter (con soporte para propiedades calculadas)
     └── OrderModel.java                     (~138 líneas) - Model para GetOrder
 ```
 
@@ -32,7 +32,7 @@ com.doceleguas.pos.webservices/
 |-------|-------------|-----------------|
 | `GetOrdersFilter` | PaidReceiptsFilter | WebService HTTP para consultar múltiples órdenes con filtros |
 | `GetOrder` | PaidReceipts | WebService HTTP para obtener una sola orden por ID |
-| `OrdersFilterModel` | - | Construye NativeQuery con filtros dinámicos para múltiples órdenes |
+| `OrdersFilterModel` | - | Construye NativeQuery con filtros dinámicos y soporte para propiedades calculadas (@orderType, @deliveryMode, @deliveryDate) |
 | `OrderModel` | - | Construye NativeQuery para una sola orden |
 
 ### Comparación con PaidReceipts/PaidReceiptsFilter
@@ -42,6 +42,7 @@ com.doceleguas.pos.webservices/
 | **Query** | HQL (ProcessHQLQueryValidated) | Native SQL |
 | **Columnas** | Fijas via CDI Extensions | Dinámicas via selectList |
 | **Filtros** | remoteFilters JSON | Simples: f.{col}={val} |
+| **Propiedades Calculadas** | Subqueries HQL en ModelExtension | Alias @property → SQL expressions |
 | **Extensibilidad** | CDI/ModelExtension | Modificar selectList |
 
 ---
@@ -125,13 +126,28 @@ f.{columna}={valor}
 | `f.dateto` | Fin de rango de fechas |
 | `f.ordertype` | Tipo de orden: ORD, RET, LAY, verifiedReturns, payOpenTickets |
 
+## Propiedades Calculadas (Computed Properties)
+
+El WebService soporta propiedades calculadas que no son columnas directas de tabla. Se usan con prefijo `@`:
+
+| Alias | Descripción | SQL Generado |
+|-------|-------------|--------------|
+| `@orderType` | Tipo de orden calculado | `CASE WHEN doctype.isreturn='Y' THEN 'RET' WHEN doctype.docsubtypeso='OB' THEN 'QT' WHEN ord.em_obpos_islayaway='Y' THEN 'LAY' ELSE 'ORD' END` |
+| `@deliveryMode` | Modo de entrega de líneas | Subquery sobre c_orderline.em_obrdm_deliverymode |
+| `@deliveryDate` | Fecha/hora de entrega | Subquery sobre c_orderline.em_obrdm_deliverydate/time |
+
+Ejemplo de uso:
+```
+selectList=ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode"
+```
+
 ## Ejemplo de Request
 
 ```http
 GET /ws/com.doceleguas.pos.webservices.GetOrdersFilter
   ?client=757D621ABD1948F5BCBAD91F19BB70AC
   &organization=594C60A9C1154300AEB808C117437D7F
-  &selectList=ord.c_order_id as "id", ord.documentno as "documentNo", ord.grandtotal as "total"
+  &selectList=ord.c_order_id as "id", ord.documentno as "documentNo", ord.grandtotal as "total", @orderType as "orderType"
   &f.documentno=VBS2
   &f.ordertype=ORD
   &limit=50

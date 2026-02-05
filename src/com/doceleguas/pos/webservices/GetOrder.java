@@ -18,6 +18,7 @@ import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.query.NativeQuery;
 import org.openbravo.dal.core.OBContext;
+import org.openbravo.dal.service.OBDal;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
@@ -29,6 +30,13 @@ import com.doceleguas.pos.webservices.orders.OrderModel;
  * This service provides a REST API for retrieving detailed order data for a specific
  * order identified by its UUID. It is the equivalent of PaidReceipts in the
  * org.openbravo.retail.posterminal module.
+ * 
+ * <p>Always includes computed array properties:</p>
+ * <ul>
+ *   <li>{@code receiptLines} - Order lines with taxes and promotions (each line includes taxes and promotions arrays)</li>
+ *   <li>{@code receiptPayments} - Payments associated with the order</li>
+ *   <li>{@code receiptTaxes} - Tax summary for the order</li>
+ * </ul>
  * 
  * @see GetOrdersFilter For querying multiple orders with filters
  * @see OrderModel The native SQL query builder for single order
@@ -79,6 +87,24 @@ public class GetOrder implements WebService {
         @SuppressWarnings("unchecked")
         Map<String, Object> rowMap = (Map<String, Object>) results.get(0);
         JSONObject orderData = orderModel.rowToJson(rowMap);
+        
+        // Get the order ID for fetching related data
+        String orderId = getOrderId(rowMap);
+        
+        // Always add computed array properties (mandatory for ticket data)
+        if (orderId != null) {
+          // Receipt lines with taxes and promotions per line
+          JSONArray receiptLines = orderModel.getReceiptLines(orderId);
+          orderData.put("receiptLines", receiptLines);
+          
+          // Receipt payments
+          JSONArray receiptPayments = orderModel.getReceiptPayments(orderId);
+          orderData.put("receiptPayments", receiptPayments);
+          
+          // Receipt taxes summary
+          JSONArray receiptTaxes = orderModel.getReceiptTaxes(orderId);
+          orderData.put("receiptTaxes", receiptTaxes);
+        }
         
         responseJson.put("success", true);
         responseJson.put("data", orderData);
@@ -143,6 +169,36 @@ public class GetOrder implements WebService {
     }
     
     return jsonParams;
+  }
+  
+  /**
+  /**
+   * Extracts the order ID from the result row map.
+   * Tries common column names for the order ID.
+   * 
+   * @param rowMap The result row map
+   * @return The order ID or null if not found
+   */
+  private String getOrderId(Map<String, Object> rowMap) {
+    // Try different possible column names for order ID
+    Object id = rowMap.get("orderid");
+    if (id == null) {
+      id = rowMap.get("id");
+    }
+    if (id == null) {
+      id = rowMap.get("c_order_id");
+    }
+    if (id == null) {
+      // Try case-insensitive search
+      for (Map.Entry<String, Object> entry : rowMap.entrySet()) {
+        if (entry.getKey().toLowerCase().contains("order") && 
+            entry.getKey().toLowerCase().contains("id")) {
+          id = entry.getValue();
+          break;
+        }
+      }
+    }
+    return id != null ? id.toString() : null;
   }
   
   /**

@@ -121,7 +121,7 @@ f.datefrom=2025-02-03
 
 El parámetro `selectList` define las columnas a devolver. Debe usar nombres de columnas SQL con alias para el frontend.
 
-### Columnas Equivalentes a PaidReceiptsFilterProperties
+### Columnas Directas (tablas base)
 
 | Columna SQL | Alias Recomendado | Descripción | Origen en PaidReceiptsFilterProperties |
 |-------------|-------------------|-------------|----------------------------------------|
@@ -145,32 +145,108 @@ El parámetro `selectList` define las columnas a devolver. Debe usar nombres de 
 | `ord.invoiceterms` | `invoiceTerms` | Términos de factura | `ord.invoiceTerms` |
 | `obpos.obpos_applications_id` | `currentTerminal` | Terminal actual | - |
 
-### Ejemplo de selectList
+---
+
+### ⚠️ Propiedades Calculadas (Computed Properties)
+
+Algunas propiedades de `PaidReceiptsFilterProperties` **NO son columnas directas** sino valores calculados mediante subqueries o expresiones CASE. Para solicitarlas, usa los alias especiales con prefijo `@`:
+
+| Alias Especial | Alias de Salida | Descripción | Equivalente en PaidReceiptsFilterProperties |
+|----------------|-----------------|-------------|----------------------------------------------|
+| `@orderType` | `orderType` | Tipo de orden calculado: 'ORD', 'RET', 'LAY', 'QT' | `getOrderType()` CASE expression |
+| `@deliveryMode` | `deliveryMode` | Modo de entrega máximo de las líneas (default: 'PickAndCarry') | Subquery sobre OrderLine.obrdmDeliveryMode |
+| `@deliveryDate` | `deliveryDate` | Fecha/hora mínima de entrega de las líneas | Subquery sobre OrderLine.obrdmDeliveryDate/Time |
+
+#### Cómo Funcionan
+
+Estas propiedades son **alias especiales** que el backend reemplaza automáticamente por sus expresiones SQL correspondientes:
+
+**`@orderType`** se convierte en:
+```sql
+(CASE 
+  WHEN doctype.isreturn = 'Y' THEN 'RET' 
+  WHEN doctype.docsubtypeso = 'OB' THEN 'QT' 
+  WHEN COALESCE(ord.em_obpos_islayaway, 'N') = 'Y' THEN 'LAY' 
+  ELSE 'ORD' 
+END)
+```
+
+**`@deliveryMode`** se convierte en:
+```sql
+(SELECT COALESCE(MAX(ol.em_obrdm_deliverymode), 'PickAndCarry') 
+ FROM c_orderline ol 
+ WHERE ol.c_order_id = ord.c_order_id 
+ AND COALESCE(ol.em_obpos_isdeleted, 'N') = 'N')
+```
+
+**`@deliveryDate`** se convierte en:
+```sql
+(SELECT MIN(CASE 
+  WHEN ol.em_obrdm_deliverydate IS NULL OR ol.em_obrdm_deliverytime IS NULL THEN NULL 
+  ELSE (ol.em_obrdm_deliverydate + ol.em_obrdm_deliverytime) 
+END) 
+FROM c_orderline ol 
+WHERE ol.c_order_id = ord.c_order_id)
+```
+
+#### Ejemplo de Uso de Propiedades Calculadas
+
+```
+selectList=ord.c_order_id as "id", ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode", @deliveryDate as "deliveryDate"
+```
+
+#### Response con Propiedades Calculadas
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "F5B00821E0F32EAFF8BD0792B1B68BE0",
+      "documentNo": "VBS2/0000122",
+      "orderType": "ORD",
+      "deliveryMode": "HomeDelivery",
+      "deliveryDate": "2026-02-05T14:30:00"
+    }
+  ],
+  "totalRows": 1
+}
+```
+
+> **Nota Importante**: Los alias `@orderType`, `@deliveryMode` y `@deliveryDate` son case-insensitive. Se pueden usar como `@OrderType`, `@ORDERTYPE`, etc.
+
+---
+
+### Ejemplo de selectList (columnas directas)
 
 ```
 selectList=ord.c_order_id as "id", ord.documentno as "documentNo", ord.dateordered as "orderDate", bp.name as "businessPartnerName", ord.grandtotal as "totalamount", ord.docstatus as "documentStatus", org.name as "organizationName"
+```
+
+### Ejemplo de selectList (con propiedades calculadas)
+
+```
+selectList=ord.c_order_id as "id", ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode", @deliveryDate as "deliveryDate", ord.grandtotal as "totalamount"
 ```
 
 ---
 
 ## Ejemplo Completo de Request
 
-### Request
+### Request (con propiedades calculadas)
 ```http
 GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
   ?client=39363B0921BB4293B48383844325E84C
   &organization=D270A5AC50874F8BA67A88EE977F8E3B
-  &selectList=ord.c_order_id as "id", ord.documentno as "documentNo", ord.dateordered as "orderDate", bp.c_bpartner_id as "businessPartner", bp.name as "businessPartnerName", ord.grandtotal as "totalamount", ord.docstatus as "documentStatus", ord.iscancelled as "iscancelled", org.ad_org_id as "organization", org.name as "organizationName", ord.delivered as "isdelivered"
+  &selectList=ord.c_order_id as "id", ord.documentno as "documentNo", ord.dateordered as "orderDate", bp.name as "businessPartnerName", ord.grandtotal as "totalamount", @orderType as "orderType", @deliveryMode as "deliveryMode", @deliveryDate as "deliveryDate"
   &f.documentno=VBS2
-  &f.c_bpartner_id=EDC5DBD82C3B4E3896B3955E041B242C
-  &f.datefrom=2026-02-01
   &f.ordertype=ORD
   &limit=50
   &offset=0
   &orderBy=ord.created DESC
 ```
 
-### Response
+### Response (con propiedades calculadas)
 ```json
 {
   "success": true,
@@ -179,24 +255,21 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
       "id": "F5B00821E0F32EAFF8BD0792B1B68BE0",
       "documentNo": "VBS2/0000122",
       "orderDate": "2026-02-02",
-      "businessPartner": "EDC5DBD82C3B4E3896B3955E041B242C",
       "businessPartnerName": "Arturo 333 Montoro",
       "totalamount": 384.4,
-      "documentStatus": "CO",
-      "iscancelled": false,
-      "organization": "D270A5AC50874F8BA67A88EE977F8E3B",
-      "organizationName": "Vall Blanca Store",
-      "isdelivered": true
+      "orderType": "ORD",
+      "deliveryMode": "HomeDelivery",
+      "deliveryDate": "2026-02-05T14:30:00"
     }
   ],
   "totalRows": 1
 }
 ```
 
-### Ejemplo curl
+### Ejemplo curl (con propiedades calculadas)
 ```bash
 curl -u admin:admin \
-  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter?client=39363B0921BB4293B48383844325E84C&organization=D270A5AC50874F8BA67A88EE977F8E3B&selectList=ord.c_order_id+as+%22id%22%2C+ord.documentno+as+%22documentNo%22%2C+ord.grandtotal+as+%22totalamount%22&f.documentno=VBS2&f.ordertype=ORD&limit=50"
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter?client=39363B0921BB4293B48383844325E84C&organization=D270A5AC50874F8BA67A88EE977F8E3B&selectList=ord.c_order_id+as+%22id%22%2C+ord.documentno+as+%22documentNo%22%2C+%40orderType+as+%22orderType%22%2C+%40deliveryMode+as+%22deliveryMode%22&f.documentno=VBS2&f.ordertype=ORD&limit=50"
 ```
 
 ---
@@ -219,6 +292,18 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrder
 | `organization` | UUID | ID de la organización |
 | `selectList` | String | Columnas SQL a devolver (URL-encoded) |
 | `orderId` **o** `documentNo` | String | Identificador de la orden (uno de los dos es requerido) |
+
+## Propiedades de Arrays (Incluidas Automáticamente)
+
+El response de GetOrder **siempre incluye** las siguientes propiedades de arrays, equivalentes a PaidReceipts:
+
+| Propiedad | Descripción |
+|-----------|-------------|
+| `receiptLines` | Líneas de la orden con `taxes` y `promotions` anidados |
+| `receiptPayments` | Pagos asociados a la orden |
+| `receiptTaxes` | Resumen de impuestos de la orden |
+
+> **Nota**: Estas propiedades se incluyen automáticamente en cada respuesta. Las líneas siempre incluyen sus arrays `taxes` y `promotions` (pueden estar vacíos si no aplican).
 
 ---
 
@@ -265,6 +350,21 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrder
 
 ```
 selectList=ord.c_order_id as "orderid", ord.documentno as "documentNo", ord.dateordered as "orderDate", ord.created as "creationDate", bp.c_bpartner_id as "bp", bp.name as "businessPartner$_identifier", ord.grandtotal as "totalamount", salesrep.name as "salesRepresentative$_identifier", ord.c_doctypetarget_id as "documentType", ord.description as "description", obpos.obpos_applications_id as "posTerminal", obpos.name as "posTerminal$_identifier", org.ad_org_id as "organization", org.name as "organization$_identifier", ord.iscancelled as "iscancelled", ord.em_obpos_islayaway as "isLayaway"
+```
+
+### Propiedades Calculadas en GetOrder
+
+GetOrder también soporta las mismas propiedades calculadas que GetOrdersFilter:
+
+| Alias Especial | Descripción |
+|----------------|-------------|
+| `@orderType` | Tipo de orden: 'ORD', 'RET', 'LAY', 'QT' |
+| `@deliveryMode` | Modo de entrega de las líneas |
+| `@deliveryDate` | Fecha/hora de entrega de las líneas |
+
+Ejemplo:
+```
+selectList=ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode", @deliveryDate as "deliveryDate"
 ```
 
 ---
@@ -400,15 +500,200 @@ Ambos WebServices utilizan los siguientes JOINs que permiten acceder a columnas 
 
 | Aspecto | PaidReceiptsFilter/PaidReceipts | GetOrdersFilter/GetOrder |
 |---------|--------------------------------|--------------------------|
-| **Líneas de orden** | Incluidas en `receiptLines` | No incluidas (solo cabecera) |
-| **Pagos** | Incluidos en `receiptPayments` | No incluidos |
-| **Impuestos** | Incluidos en `receiptTaxes` | No incluidos |
+| **Líneas de orden** | Incluidas en `receiptLines` | **GetOrder**: Siempre incluidas en `receiptLines` |
+| **Pagos** | Incluidos en `receiptPayments` | **GetOrder**: Siempre incluidos en `receiptPayments` |
+| **Impuestos** | Incluidos en `receiptTaxes` | **GetOrder**: Siempre incluidos en `receiptTaxes` |
+| **Taxes por línea** | Incluidos en cada línea | **GetOrder**: Siempre incluidos (array puede estar vacío) |
+| **Promotions por línea** | Incluidos en cada línea | **GetOrder**: Siempre incluidos (array puede estar vacío) |
 | **Formato de fechas** | ISO con timezone | Fecha simple |
 | **Extensiones CDI** | Soportadas | No aplica |
 
-> **Nota**: Si necesitas líneas de orden, pagos o impuestos, deberás hacer llamadas adicionales o extender los Models para incluirlos.
+---
+
+## Propiedades de Arrays Computadas (GetOrder)
+
+GetOrder soporta tres propiedades de arrays computadas equivalentes a PaidReceipts:
+
+### receiptLines (includeLines=true)
+
+Array de líneas de la orden. Cada línea incluye:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `lineId` | UUID | ID de la línea |
+| `lineNo` | Number | Número de línea |
+| `product` | UUID | ID del producto |
+| `product$_identifier` | String | Nombre del producto |
+| `productSearchKey` | String | Código del producto |
+| `quantity` | Number | Cantidad ordenada |
+| `unitPrice` | Number | Precio unitario |
+| `listPrice` | Number | Precio de lista |
+| `lineNetAmount` | Number | Monto neto de la línea |
+| `lineGrossAmount` | Number | Monto bruto de la línea |
+| `tax` | UUID | ID del impuesto |
+| `tax$_identifier` | String | Nombre del impuesto |
+| `taxRate` | Number | Tasa del impuesto |
+| `description` | String | Descripción de la línea |
+| `deliveryMode` | String | Modo de entrega de la línea |
+| `deliveryDate` | Date | Fecha de entrega de la línea |
+| `taxes` | Array | **Array de impuestos por línea** |
+| `promotions` | Array | **Array de promociones/descuentos** |
+
+#### Estructura de `taxes` (por línea)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `taxId` | UUID | ID del impuesto |
+| `identifier` | String | Nombre del impuesto |
+| `taxAmount` | Number | Monto del impuesto |
+| `taxableAmount` | Number | Base imponible |
+| `taxRate` | Number | Tasa |
+| `docTaxAmount` | String | Tipo de impuesto |
+| `lineNo` | Number | Número de línea |
+| `cascade` | Boolean | Si es impuesto en cascada |
+| `isSpecialTax` | Boolean | Si es impuesto especial |
+
+#### Estructura de `promotions` (por línea)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `ruleId` | UUID | ID de la promoción |
+| `name` | String | Nombre de la promoción |
+| `printName` | String | Nombre para impresión |
+| `discountType` | UUID | Tipo de descuento |
+| `amt` | Number | Monto de descuento |
+| `actualAmt` | Number | Monto actual |
+| `displayedTotalAmount` | Number | Monto mostrado |
+| `qtyOffer` | Number | Cantidad de oferta |
+| `identifier` | String | Identificador |
+| `lineNo` | Number | Número de línea |
+| `hidden` | Boolean | Si está oculto |
+
+### receiptPayments (includePayments=true)
+
+Array de pagos asociados a la orden:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `paymentId` | UUID | ID del pago |
+| `documentNo` | String | Número de documento del pago |
+| `paymentDate` | Date | Fecha del pago |
+| `amount` | Number | Monto del pago |
+| `paymentAmount` | Number | Monto total pagado |
+| `financialTransactionAmount` | Number | Monto transacción financiera |
+| `account` | UUID | ID cuenta financiera |
+| `accountName` | String | Nombre de la cuenta |
+| `paymentMethod` | String | Nombre método de pago |
+| `paymentMethodId` | UUID | ID método de pago |
+| `isocode` | String | Código ISO de moneda |
+| `cashup` | UUID | ID del cashup |
+| `posTerminal` | UUID | ID terminal POS |
+| `posTerminalSearchKey` | String | Clave del terminal |
+| `comment` | String | Comentario/descripción |
+| `paymentData` | Object | Datos adicionales del pago (JSON) |
+| `reversedPaymentId` | UUID | ID pago revertido (si aplica) |
+| `isReversed` | Boolean | Si está revertido |
+
+### receiptTaxes (includeTaxes=true)
+
+Array resumen de impuestos de la orden:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `taxid` | UUID | ID del impuesto |
+| `rate` | Number | Tasa |
+| `net` | Number | Base imponible |
+| `amount` | Number | Monto del impuesto |
+| `name` | String | Nombre del impuesto |
+| `gross` | Number | Total (neto + impuesto) |
+| `cascade` | Boolean | Si es en cascada |
+| `docTaxAmount` | String | Tipo |
+| `lineNo` | Number | Número de línea |
+| `taxBase` | UUID | ID categoría de impuesto |
+| `isSpecialTax` | Boolean | Si es especial |
+
+---
+
+## Ejemplo Completo de Request (GetOrder)
+
+### Request
+```http
+GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrder
+  ?client=39363B0921BB4293B48383844325E84C
+  &organization=D270A5AC50874F8BA67A88EE977F8E3B
+  &orderId=F5B00821E0F32EAFF8BD0792B1B68BE0
+  &selectList=ord.c_order_id as "orderid", ord.documentno as "documentNo", ord.grandtotal as "totalamount"
+```
+
+### Response
+```json
+{
+  "success": true,
+  "data": {
+    "orderid": "F5B00821E0F32EAFF8BD0792B1B68BE0",
+    "documentNo": "VBS2/0000122",
+    "totalamount": 384.4,
+    "receiptLines": [
+      {
+        "lineId": "A1B2C3D4...",
+        "lineNo": 10,
+        "product": "PR123...",
+        "product$_identifier": "Producto de ejemplo",
+        "quantity": 2,
+        "unitPrice": 160.50,
+        "lineNetAmount": 321.00,
+        "taxes": [
+          {
+            "taxId": "TAX123...",
+            "identifier": "IVA 21%",
+            "taxAmount": 67.41,
+            "taxableAmount": 321.00,
+            "taxRate": 21.0
+          }
+        ],
+        "promotions": [
+          {
+            "ruleId": "PROMO123...",
+            "name": "Descuento 10%",
+            "amt": -32.10,
+            "hidden": false
+          }
+        ]
+      }
+    ],
+    "receiptPayments": [
+      {
+        "paymentId": "PAY123...",
+        "documentNo": "PAY/0001",
+        "paymentDate": "2026-02-02",
+        "amount": 384.40,
+        "paymentMethod": "Efectivo",
+        "isocode": "EUR"
+      }
+    ],
+    "receiptTaxes": [
+      {
+        "taxid": "TAX123...",
+        "name": "IVA 21%",
+        "rate": 21.0,
+        "net": 317.68,
+        "amount": 66.72,
+        "gross": 384.40
+      }
+    ]
+  }
+}
+```
+
+> **Nota**: `receiptLines`, `receiptPayments` y `receiptTaxes` siempre se incluyen en el response. Cada línea siempre incluye `taxes` y `promotions` (pueden ser arrays vacíos `[]`).
+
+### Ejemplo curl
+```bash
+curl -u admin:admin \
+  "http://localhost:8080/openbravo/ws/com.doceleguas.pos.webservices.GetOrder?client=39363B0921BB4293B48383844325E84C&organization=D270A5AC50874F8BA67A88EE977F8E3B&orderId=F5B00821E0F32EAFF8BD0792B1B68BE0&selectList=ord.c_order_id+as+%22orderid%22%2C+ord.documentno+as+%22documentNo%22%2C+ord.grandtotal+as+%22totalamount%22"
+```
 
 ---
 
 *Documentación actualizada: 2025-02-04*
-*Versión: 1.0*
+*Versión: 1.1*
