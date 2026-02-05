@@ -182,8 +182,8 @@ END)
 **`@deliveryDate`** se convierte en:
 ```sql
 (SELECT MIN(CASE 
-  WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_deliverytime IS NULL THEN NULL 
-  ELSE (ol.em_obrdm_delivery_date + ol.em_obrdm_deliverytime) 
+  WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_delivery_time IS NULL THEN NULL 
+  ELSE (ol.em_obrdm_delivery_date + ol.em_obrdm_delivery_time) 
 END) 
 FROM c_orderline ol 
 WHERE ol.c_order_id = ord.c_order_id)
