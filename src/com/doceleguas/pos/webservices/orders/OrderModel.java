@@ -391,7 +391,7 @@ public class OrderModel extends Model {
         + "pos.value as \"posTerminalSearchKey\", "
         + "fp.description as \"comment\", "
         + "fp.em_obpos_paymentdata as \"paymentData\", "
-        + "fp.fin_rev_reversed_payment_id as \"reversedPayment\" "
+        + "fp.fin_rev_payment_id as \"reversedPayment\" "
         + "FROM fin_payment fp "
         + "JOIN fin_payment_detail pd ON fp.fin_payment_id = pd.fin_payment_id "
         + "JOIN fin_payment_scheduledetail psd ON pd.fin_payment_detail_id = psd.fin_payment_detail_id "
@@ -405,7 +405,7 @@ public class OrderModel extends Model {
         + "fp.finacc_txn_amount, fa.fin_financial_account_id, fa.name, pm.name, "
         + "pm.fin_paymentmethod_id, c.iso_code, fp.em_obpos_app_cashup_id, "
         + "fp.em_obpos_applications_id, pos.value, fp.description, fp.em_obpos_paymentdata, "
-        + "fp.fin_rev_reversed_payment_id "
+        + "fp.fin_rev_payment_id "
         + "ORDER BY fp.documentno";
     
     NativeQuery<?> queryPayments = OBDal.getInstance().getSession().createNativeQuery(sqlPayments);
