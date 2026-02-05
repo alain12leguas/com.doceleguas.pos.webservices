@@ -133,7 +133,7 @@ El WebService soporta propiedades calculadas que no son columnas directas de tab
 | Alias | Descripción | SQL Generado |
 |-------|-------------|--------------|
 | `@orderType` | Tipo de orden calculado | `CASE WHEN doctype.isreturn='Y' THEN 'RET' WHEN doctype.docsubtypeso='OB' THEN 'QT' WHEN ord.em_obpos_islayaway='Y' THEN 'LAY' ELSE 'ORD' END` |
-| `@deliveryMode` | Modo de entrega de líneas | Subquery sobre c_orderline.em_obrdm_deliverymode |
+| `@deliveryMode` | Modo de entrega de líneas | Subquery sobre c_orderline.em_obrdm_delivery_mode |
 | `@deliveryDate` | Fecha/hora de entrega | Subquery sobre c_orderline.em_obrdm_deliverydate/time |
 
 Ejemplo de uso:

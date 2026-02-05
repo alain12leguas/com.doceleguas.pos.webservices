@@ -45,7 +45,7 @@ public class OrdersFilterModel extends Model {
    * Equivalent to PaidReceiptsFilterProperties.deliveryMode
    */
   private static final String DELIVERY_MODE_SQL = 
-      "(SELECT COALESCE(MAX(ol.em_obrdm_deliverymode), 'PickAndCarry') "
+      "(SELECT COALESCE(MAX(ol.em_obrdm_delivery_mode), 'PickAndCarry') "
       + "FROM c_orderline ol "
       + "WHERE ol.c_order_id = ord.c_order_id "
       + "AND COALESCE(ol.em_obpos_isdeleted, 'N') = 'N')";
