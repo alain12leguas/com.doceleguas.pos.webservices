@@ -57,8 +57,8 @@ public class OrdersFilterModel extends Model {
    */
   private static final String DELIVERY_DATE_SQL = 
       "(SELECT MIN(CASE "
-      + "WHEN ol.em_obrdm_deliverydate IS NULL OR ol.em_obrdm_deliverytime IS NULL THEN NULL "
-      + "ELSE (ol.em_obrdm_deliverydate + ol.em_obrdm_deliverytime) "
+      + "WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_deliverytime IS NULL THEN NULL "
+      + "ELSE (ol.em_obrdm_delivery_date + ol.em_obrdm_deliverytime) "
       + "END) "
       + "FROM c_orderline ol "
       + "WHERE ol.c_order_id = ord.c_order_id)";
