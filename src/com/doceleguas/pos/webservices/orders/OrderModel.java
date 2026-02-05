@@ -283,7 +283,7 @@ public class OrderModel extends Model {
         + "olt.c_tax_id as \"taxId\", "
         + "t.name as \"identifier\", "
         + "olt.taxamt as \"taxAmount\", "
-        + "olt.taxableamt as \"taxableAmount\", "
+        + "olt.taxbaseamt as \"taxableAmount\", "
         + "t.rate as \"taxRate\", "
         + "t.doctaxamount as \"docTaxAmount\", "
         + "olt.line as \"lineNo\", "
