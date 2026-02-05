@@ -399,13 +399,13 @@ public class OrderModel extends Model {
         + "JOIN fin_financial_account fa ON fp.fin_financial_account_id = fa.fin_financial_account_id "
         + "JOIN fin_paymentmethod pm ON fp.fin_paymentmethod_id = pm.fin_paymentmethod_id "
         + "JOIN c_currency c ON fa.c_currency_id = c.c_currency_id "
-        + "LEFT JOIN obpos_applications pos ON fp.em_obpos_posterminal_id = pos.obpos_applications_id "
+        + "LEFT JOIN obpos_applications pos ON fp.em_obpos_applications_id = pos.obpos_applications_id "
         + "WHERE ps.c_order_id = :orderId "
         + "GROUP BY fp.fin_payment_id, fp.documentno, fp.paymentdate, fp.amount, "
         + "fp.finacc_txn_amount, fa.fin_financial_account_id, fa.name, pm.name, "
         + "pm.fin_paymentmethod_id, c.iso_code, fp.em_obpos_app_cashup_id, "
-        + "fp.em_obpos_posterminal_id, pos.value, fp.description, fp.em_obpos_paymentdata, "
-        + "fp.reversed_payment_id "
+        + "fp.em_obpos_applications_id, pos.value, fp.description, fp.em_obpos_paymentdata, "
+        + "fp.fin_rev_reversed_payment_id "
         + "ORDER BY fp.documentno";
     
     NativeQuery<?> queryPayments = OBDal.getInstance().getSession().createNativeQuery(sqlPayments);
