@@ -117,10 +117,10 @@ public final class OrderQueryHelper {
   public static final String STATUS_SQL = 
       "(CASE "
       + "WHEN doctype.isreturn = 'Y' THEN 'Refunded' "
-      + "WHEN doctype.docsubtypeso = 'OB' THEN 'UnderEvaluation' "
+      + "WHEN doctype.docsubtypeso = 'OB' THEN 'Under Evaluation' "
       + "WHEN ord.iscancelled = 'Y' THEN 'Cancelled' "
       + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) = 0 THEN 'UnPaid' "
-      + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) < ord.grandtotal THEN 'PartiallyPaid' "
+      + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) < ord.grandtotal THEN 'Partially Paid' "
       + "ELSE 'Paid' END)";
   
   /**
