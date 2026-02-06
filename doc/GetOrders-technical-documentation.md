@@ -99,6 +99,8 @@ com.doceleguas.pos.webservices/
 | **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY |
 | **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL (9 propiedades) |
 | **Método** | `rowToJson()` | Conversión de Map a JSONObject |
+| **Método** | `isComputedProperty()` | Detecta si un filtro es propiedad calculada (en OrdersFilterModel) |
+| **Método** | `getComputedPropertySql()` | Obtiene SQL de propiedad calculada para filtros (en OrdersFilterModel) |
 
 ---
 
@@ -150,6 +152,21 @@ f.{columna}={valor}
 | `f.datefrom` | Inicio de rango de fechas |
 | `f.dateto` | Fin de rango de fechas |
 | `f.ordertype` | Tipo de orden: ORD, RET, LAY, verifiedReturns, payOpenTickets |
+
+### Filtros de Propiedades Calculadas
+
+Las propiedades calculadas pueden usarse como filtros (sin el prefijo `@`):
+
+| Filtro | SQL Generado |
+|--------|-------------|
+| `f.status=Paid` | `(CASE WHEN doctype.isreturn = 'Y' THEN 'Refunded' ... END) = 'Paid'` |
+| `f.paidamount=100` | `(SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule...) = 100` |
+| `f.invoicecreated=true` | `(EXISTS(SELECT 1 FROM c_invoiceline...)) = true` |
+| `f.hasverifiedreturn=true` | `(SELECT CASE WHEN COUNT(...) > 0 THEN true...) = true` |
+| `f.hasnegativelines=false` | `(CASE WHEN EXISTS (...qtyordered < 0)...) = false` |
+| `f.isquotation=true` | `(CASE WHEN ord.quotation_id IS NOT NULL...) = true` |
+| `f.deliverymode=PickAndCarry` | `(SELECT COALESCE(MAX(ol.em_obrdm_delivery_mode)...) = 'PickAndCarry'` |
+| `f.deliverydate=...` | `(SELECT MIN(CASE WHEN ol.em_obrdm_delivery_date...) = ...` |
 
 ## Propiedades Calculadas (Computed Properties)
 
@@ -353,5 +370,5 @@ curl -u admin:admin \
 
 ---
 
-*Documentación actualizada: 2026-02-05*
-*Versión: 6.0 - Nuevas propiedades calculadas: paidAmount, status, invoiceCreated, hasVerifiedReturn, hasNegativeLines, isQuotation*
+*Documentación actualizada: 2026-02-06*
+*Versión: 6.1 - Soporte para filtros de propiedades calculadas (f.status, f.paidamount, etc.)*

@@ -67,6 +67,30 @@ f.{columna}={valor}
 | `f.ordertype` | (especial) | (ver tabla abajo) | Tipo de orden | `orderType` |
 | `f.em_obpos_applications_id` | `ord.em_obpos_applications_id` | = (equals) | Terminal POS | `currentTerminal` |
 
+### Filtros de Propiedades Calculadas
+
+Las propiedades calculadas (computed properties) también pueden usarse como filtros. Se usan **sin el prefijo `@`**:
+
+| Filtro | Propiedad Calculada | Tipo | Valores de Ejemplo |
+|--------|---------------------|------|--------------------|
+| `f.status` | `@status` | String | `Paid`, `Partially Paid`, `UnPaid`, `Cancelled`, `Refunded`, `Under Evaluation` |
+| `f.paidamount` | `@paidAmount` | Decimal | Valor numérico |
+| `f.invoicecreated` | `@invoiceCreated` | Boolean | `true`, `false` |
+| `f.hasverifiedreturn` | `@hasVerifiedReturn` | Boolean | `true`, `false` |
+| `f.hasnegativelines` | `@hasNegativeLines` | Boolean | `true`, `false` |
+| `f.isquotation` | `@isQuotation` | Boolean | `true`, `false` |
+| `f.deliverymode` | `@deliveryMode` | String | `PickAndCarry`, etc. |
+| `f.deliverydate` | `@deliveryDate` | Timestamp | Valor de fecha/hora |
+
+**Ejemplo de uso:**
+```
+f.status=Partially Paid
+f.invoicecreated=true
+f.deliverymode=PickAndCarry
+```
+
+> **Nota**: Los nombres de filtros son case-insensitive. `f.status`, `f.Status` y `f.STATUS` funcionan igual.
+
 ### Filtro Especial: `f.ordertype`
 
 El filtro `ordertype` tiene manejo especial para clasificar tipos de orden:
@@ -766,5 +790,5 @@ curl -u admin:admin \
 
 ---
 
-*Documentación actualizada: 2026-02-05*
-*Versión: 3.0 - Nuevas propiedades calculadas: @paidAmount, @status, @invoiceCreated, @hasVerifiedReturn, @hasNegativeLines, @isQuotation*
+*Documentación actualizada: 2026-02-06*
+*Versión: 3.1 - Soporte para filtros de propiedades calculadas (f.status, f.paidamount, etc.)*
