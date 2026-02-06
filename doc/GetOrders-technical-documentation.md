@@ -88,10 +88,16 @@ com.doceleguas.pos.webservices/
 | **Constante** | `DELIVERY_MODE_SQL` | Subquery para modo de entrega desde líneas |
 | **Constante** | `DELIVERY_DATE_SQL` | Subquery para fecha de entrega (PostgreSQL compatible) |
 | **Constante** | `ORDER_TYPE_SQL` | CASE expression para tipo de orden |
+| **Constante** | `PAID_AMOUNT_SQL` | Subquery para suma de montos pagados |
+| **Constante** | `STATUS_SQL` | CASE expression para estado de orden |
+| **Constante** | `INVOICE_CREATED_SQL` | EXISTS para verificar factura creada |
+| **Constante** | `HAS_VERIFIED_RETURN_SQL` | Subquery para devoluciones verificadas |
+| **Constante** | `HAS_NEGATIVE_LINES_SQL` | EXISTS para líneas con cantidad negativa |
+| **Constante** | `IS_QUOTATION_SQL` | CASE para verificar si es cotización |
 | **Constante** | `ORDER_BASE_JOINS` | JOINs comunes para queries de órdenes |
 | **Método** | `sanitizeSelectList()` | Prevención de SQL injection en SELECT |
 | **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY |
-| **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL |
+| **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL (9 propiedades) |
 | **Método** | `rowToJson()` | Conversión de Map a JSONObject |
 
 ---
@@ -149,15 +155,21 @@ f.{columna}={valor}
 
 El WebService soporta propiedades calculadas que no son columnas directas de tabla. Se usan con prefijo `@`:
 
-| Alias | Descripción | SQL Generado |
-|-------|-------------|--------------|
-| `@orderType` | Tipo de orden calculado | `CASE WHEN doctype.isreturn='Y' THEN 'RET' WHEN doctype.docsubtypeso='OB' THEN 'QT' WHEN ord.em_obpos_islayaway='Y' THEN 'LAY' ELSE 'ORD' END` |
-| `@deliveryMode` | Modo de entrega de líneas | Subquery sobre c_orderline.em_obrdm_delivery_mode |
-| `@deliveryDate` | Fecha/hora de entrega | Subquery sobre c_orderline.em_obrdm_delivery_date/time |
+| Alias | Tipo | Descripción |
+|-------|------|-------------|
+| `@orderType` | String | Tipo de orden: 'ORD', 'RET', 'LAY', 'QT' |
+| `@deliveryMode` | String | Modo de entrega de líneas (default: 'PickAndCarry') |
+| `@deliveryDate` | Timestamp | Fecha/hora mínima de entrega |
+| `@paidAmount` | Decimal | Suma de montos pagados (FIN_Payment_Schedule) |
+| `@status` | String | Estado: Refunded, UnderEvaluation, Cancelled, UnPaid, PartiallyPaid, Paid |
+| `@invoiceCreated` | Boolean | Si existe factura simplificada para la orden |
+| `@hasVerifiedReturn` | Boolean | Si tiene devoluciones verificadas |
+| `@hasNegativeLines` | Boolean | Si tiene líneas con cantidad negativa |
+| `@isQuotation` | Boolean | Si es cotización (tiene quotation_id) |
 
 Ejemplo de uso:
 ```
-selectList=ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode"
+selectList=ord.documentno as "documentNo", @orderType as "orderType", @status as "status", @paidAmount as "paidAmount"
 ```
 
 ## Ejemplo de Request
@@ -342,4 +354,4 @@ curl -u admin:admin \
 ---
 
 *Documentación actualizada: 2026-02-05*
-*Versión: 5.0 - Refactorización con OrderQueryHelper*
+*Versión: 6.0 - Nuevas propiedades calculadas: paidAmount, status, invoiceCreated, hasVerifiedReturn, hasNegativeLines, isQuotation*

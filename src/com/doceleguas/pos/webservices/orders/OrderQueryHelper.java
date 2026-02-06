@@ -91,6 +91,77 @@ public final class OrderQueryHelper {
       + "ELSE 'ORD' END)";
   
   /**
+   * SQL subquery to calculate paidAmount from payment schedules.
+   * Returns the sum of paid amounts for the order.
+   * HQL equivalent: (select coalesce(sum(fps.paidAmount), 0) from FIN_Payment_Schedule fps where fps.order = ord)
+   */
+  public static final String PAID_AMOUNT_SQL = 
+      "(SELECT COALESCE(SUM(fps.paidamt), 0) "
+      + "FROM fin_payment_schedule fps "
+      + "WHERE fps.c_order_id = ord.c_order_id)";
+  
+  /**
+   * SQL CASE expression to determine order status.
+   * Calculates status based on document type, cancellation, and payment state.
+   * 
+   * <p>Status values:</p>
+   * <ul>
+   *   <li>Refunded - Return document type</li>
+   *   <li>UnderEvaluation - Quotation document (sOSubType = 'OB')</li>
+   *   <li>Cancelled - Order is cancelled</li>
+   *   <li>UnPaid - grandTotal > 0 and no payments</li>
+   *   <li>PartiallyPaid - grandTotal > 0 and partial payment</li>
+   *   <li>Paid - Fully paid (default)</li>
+   * </ul>
+   */
+  public static final String STATUS_SQL = 
+      "(CASE "
+      + "WHEN doctype.isreturn = 'Y' THEN 'Refunded' "
+      + "WHEN doctype.docsubtypeso = 'OB' THEN 'UnderEvaluation' "
+      + "WHEN ord.iscancelled = 'Y' THEN 'Cancelled' "
+      + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) = 0 THEN 'UnPaid' "
+      + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) < ord.grandtotal THEN 'PartiallyPaid' "
+      + "ELSE 'Paid' END)";
+  
+  /**
+   * SQL EXISTS expression to check if invoice was created.
+   * Checks if any invoice line exists linked to this order's lines with simplified invoice sequence.
+   */
+  public static final String INVOICE_CREATED_SQL = 
+      "(EXISTS(SELECT 1 FROM c_invoiceline il "
+      + "JOIN c_invoice i ON il.c_invoice_id = i.c_invoice_id "
+      + "JOIN c_orderline ol ON il.c_orderline_id = ol.c_orderline_id "
+      + "WHERE ol.c_order_id = ord.c_order_id "
+      + "AND i.em_obpos_sequencename = 'simplifiedinvoiceslastassignednum'))";
+  
+  /**
+   * SQL expression to check if order has verified returns.
+   * Checks if any order line has a goods shipment line linked to a return order line.
+   */
+  public static final String HAS_VERIFIED_RETURN_SQL = 
+      "(SELECT CASE WHEN COUNT(ordLine.c_orderline_id) > 0 THEN true ELSE false END "
+      + "FROM c_orderline ordLine "
+      + "JOIN m_inoutline iol ON ordLine.m_inoutline_id = iol.m_inoutline_id "
+      + "JOIN c_orderline retOrdLine ON iol.c_orderline_id = retOrdLine.c_orderline_id "
+      + "WHERE retOrdLine.c_order_id = ord.c_order_id)";
+  
+  /**
+   * SQL CASE expression to check if order has negative quantity lines.
+   * Returns true if any order line has orderedQuantity < 0.
+   */
+  public static final String HAS_NEGATIVE_LINES_SQL = 
+      "(CASE WHEN EXISTS (SELECT 1 FROM c_orderline ordLine "
+      + "WHERE ordLine.c_order_id = ord.c_order_id "
+      + "AND ordLine.qtyordered < 0) THEN true ELSE false END)";
+  
+  /**
+   * SQL expression to check if order is a quotation (has quotation reference).
+   * Returns true if ord.quotation_id is not null.
+   */
+  public static final String IS_QUOTATION_SQL = 
+      "(CASE WHEN ord.quotation_id IS NOT NULL THEN true ELSE false END)";
+  
+  /**
    * Common JOIN clauses for order queries.
    * Joins c_order with related tables commonly needed in order queries.
    */
@@ -161,11 +232,17 @@ public final class OrderQueryHelper {
    *   <li>{@code @deliveryMode} - Maximum delivery mode from order lines (default: 'PickAndCarry')</li>
    *   <li>{@code @deliveryDate} - Minimum delivery date/time from order lines</li>
    *   <li>{@code @orderType} - Calculated order type: 'ORD', 'RET', 'LAY', or 'QT'</li>
+   *   <li>{@code @paidAmount} - Sum of paid amounts from payment schedules</li>
+   *   <li>{@code @status} - Order status: Refunded, UnderEvaluation, Cancelled, UnPaid, PartiallyPaid, Paid</li>
+   *   <li>{@code @invoiceCreated} - Boolean: true if simplified invoice exists for this order</li>
+   *   <li>{@code @hasVerifiedReturn} - Boolean: true if order has verified returns</li>
+   *   <li>{@code @hasNegativeLines} - Boolean: true if order has lines with negative quantity</li>
+   *   <li>{@code @isQuotation} - Boolean: true if order has quotation reference</li>
    * </ul>
    * 
    * <p>Example selectList:</p>
    * <pre>
-   * ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode"
+   * ord.documentno as "documentNo", @orderType as "orderType", @status as "status", @paidAmount as "paidAmount"
    * </pre>
    * 
    * @param selectList The SELECT list potentially containing computed property aliases
@@ -182,6 +259,24 @@ public final class OrderQueryHelper {
     
     // Replace @orderType with the CASE expression
     result = result.replaceAll("(?i)@orderType", ORDER_TYPE_SQL);
+    
+    // Replace @paidAmount with the subquery
+    result = result.replaceAll("(?i)@paidAmount", PAID_AMOUNT_SQL);
+    
+    // Replace @status with the CASE expression
+    result = result.replaceAll("(?i)@status", STATUS_SQL);
+    
+    // Replace @invoiceCreated with the EXISTS expression
+    result = result.replaceAll("(?i)@invoiceCreated", INVOICE_CREATED_SQL);
+    
+    // Replace @hasVerifiedReturn with the subquery
+    result = result.replaceAll("(?i)@hasVerifiedReturn", HAS_VERIFIED_RETURN_SQL);
+    
+    // Replace @hasNegativeLines with the CASE expression
+    result = result.replaceAll("(?i)@hasNegativeLines", HAS_NEGATIVE_LINES_SQL);
+    
+    // Replace @isQuotation with the CASE expression
+    result = result.replaceAll("(?i)@isQuotation", IS_QUOTATION_SQL);
     
     return result;
   }

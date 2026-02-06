@@ -151,11 +151,28 @@ El parámetro `selectList` define las columnas a devolver. Debe usar nombres de 
 
 Algunas propiedades de `PaidReceiptsFilterProperties` **NO son columnas directas** sino valores calculados mediante subqueries o expresiones CASE. Para solicitarlas, usa los alias especiales con prefijo `@`:
 
-| Alias Especial | Alias de Salida | Descripción | Equivalente en PaidReceiptsFilterProperties |
-|----------------|-----------------|-------------|----------------------------------------------|
-| `@orderType` | `orderType` | Tipo de orden calculado: 'ORD', 'RET', 'LAY', 'QT' | `getOrderType()` CASE expression |
-| `@deliveryMode` | `deliveryMode` | Modo de entrega máximo de las líneas (default: 'PickAndCarry') | Subquery sobre OrderLine.obrdmDeliveryMode |
-| `@deliveryDate` | `deliveryDate` | Fecha/hora mínima de entrega de las líneas | Subquery sobre OrderLine.obrdmDeliveryDate/Time |
+| Alias Especial | Alias de Salida | Tipo | Descripción | Equivalente en PaidReceiptsFilterProperties |
+|----------------|-----------------|------|-------------|----------------------------------------------|
+| `@orderType` | `orderType` | String | Tipo de orden: 'ORD', 'RET', 'LAY', 'QT' | `getOrderType()` CASE expression |
+| `@deliveryMode` | `deliveryMode` | String | Modo de entrega de las líneas (default: 'PickAndCarry') | Subquery OrderLine.obrdmDeliveryMode |
+| `@deliveryDate` | `deliveryDate` | Timestamp | Fecha/hora mínima de entrega | Subquery OrderLine.obrdmDeliveryDate/Time |
+| `@paidAmount` | `paidAmount` | Decimal | Suma de montos pagados | Subquery FIN_Payment_Schedule.paidAmount |
+| `@status` | `status` | String | Estado de la orden (ver tabla abajo) | CASE expression con múltiples condiciones |
+| `@invoiceCreated` | `invoiceCreated` | Boolean | Si existe factura simplificada | EXISTS sobre InvoiceLine |
+| `@hasVerifiedReturn` | `hasVerifiedReturn` | Boolean | Si tiene devoluciones verificadas | Subquery OrderLine → ShipmentLine |
+| `@hasNegativeLines` | `hasNegativeLines` | Boolean | Si tiene líneas con cantidad negativa | EXISTS OrderLine.qtyordered < 0 |
+| `@isQuotation` | `isQuotation` | Boolean | Si es cotización (tiene quotation_id) | CASE ord.quotation_id IS NOT NULL |
+
+#### Valores de `@status`
+
+| Valor | Condición |
+|-------|-----------|
+| `Refunded` | Tipo de documento es devolución (isreturn = 'Y') |
+| `UnderEvaluation` | Tipo de documento es cotización (sOSubType = 'OB') |
+| `Cancelled` | Orden cancelada (iscancelled = 'Y') |
+| `UnPaid` | grandTotal > 0 y paidAmount = 0 |
+| `PartiallyPaid` | grandTotal > 0 y paidAmount < grandTotal |
+| `Paid` | Otros casos (totalmente pagado) |
 
 #### Cómo Funcionan
 
@@ -171,33 +188,50 @@ Estas propiedades son **alias especiales** que el backend reemplaza automáticam
 END)
 ```
 
-**`@deliveryMode`** se convierte en:
+**`@paidAmount`** se convierte en:
 ```sql
-(SELECT COALESCE(MAX(ol.em_obrdm_delivery_mode), 'PickAndCarry') 
- FROM c_orderline ol 
- WHERE ol.c_order_id = ord.c_order_id 
- AND COALESCE(ol.em_obpos_isdeleted, 'N') = 'N')
+(SELECT COALESCE(SUM(fps.paidamt), 0) 
+ FROM fin_payment_schedule fps 
+ WHERE fps.c_order_id = ord.c_order_id)
 ```
 
-**`@deliveryDate`** se convierte en:
+**`@status`** se convierte en:
 ```sql
-(SELECT MIN(CASE 
-  WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_delivery_time IS NULL THEN NULL 
-  ELSE to_timestamp(
-    to_char(ol.em_obrdm_delivery_date, 'YYYY') || '-' || 
-    to_char(ol.em_obrdm_delivery_date, 'MM') || '-' || 
-    to_char(ol.em_obrdm_delivery_date, 'DD') || ' ' || 
-    to_char(ol.em_obrdm_delivery_time, 'HH24') || ':' || 
-    to_char(ol.em_obrdm_delivery_time, 'MI'), 'YYYY-MM-DD HH24:MI') 
-END) 
-FROM c_orderline ol 
-WHERE ol.c_order_id = ord.c_order_id)
+(CASE 
+  WHEN doctype.isreturn = 'Y' THEN 'Refunded' 
+  WHEN doctype.docsubtypeso = 'OB' THEN 'UnderEvaluation' 
+  WHEN ord.iscancelled = 'Y' THEN 'Cancelled' 
+  WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) = 0 THEN 'UnPaid' 
+  WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) < ord.grandtotal THEN 'PartiallyPaid' 
+  ELSE 'Paid' 
+END)
+```
+
+**`@invoiceCreated`** se convierte en:
+```sql
+(EXISTS(SELECT 1 FROM c_invoiceline il 
+  JOIN c_invoice i ON il.c_invoice_id = i.c_invoice_id 
+  JOIN c_orderline ol ON il.c_orderline_id = ol.c_orderline_id 
+  WHERE ol.c_order_id = ord.c_order_id 
+  AND i.em_obpos_sequencename = 'simplifiedinvoiceslastassignednum'))
+```
+
+**`@hasNegativeLines`** se convierte en:
+```sql
+(CASE WHEN EXISTS (SELECT 1 FROM c_orderline ordLine 
+  WHERE ordLine.c_order_id = ord.c_order_id 
+  AND ordLine.qtyordered < 0) THEN true ELSE false END)
+```
+
+**`@isQuotation`** se convierte en:
+```sql
+(CASE WHEN ord.quotation_id IS NOT NULL THEN true ELSE false END)
 ```
 
 #### Ejemplo de Uso de Propiedades Calculadas
 
 ```
-selectList=ord.c_order_id as "id", ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode", @deliveryDate as "deliveryDate"
+selectList=ord.c_order_id as "id", ord.documentno as "documentNo", @orderType as "orderType", @status as "status", @paidAmount as "paidAmount", @invoiceCreated as "invoiceCreated"
 ```
 
 #### Response con Propiedades Calculadas
@@ -210,15 +244,16 @@ selectList=ord.c_order_id as "id", ord.documentno as "documentNo", @orderType as
       "id": "F5B00821E0F32EAFF8BD0792B1B68BE0",
       "documentNo": "VBS2/0000122",
       "orderType": "ORD",
-      "deliveryMode": "HomeDelivery",
-      "deliveryDate": "2026-02-05T14:30:00"
+      "status": "Paid",
+      "paidAmount": 384.40,
+      "invoiceCreated": true
     }
   ],
   "totalRows": 1
 }
 ```
 
-> **Nota Importante**: Los alias `@orderType`, `@deliveryMode` y `@deliveryDate` son case-insensitive. Se pueden usar como `@OrderType`, `@ORDERTYPE`, etc.
+> **Nota Importante**: Todos los alias con prefijo `@` son case-insensitive. Se pueden usar como `@Status`, `@STATUS`, `@paidamount`, etc.
 
 ---
 
@@ -732,4 +767,4 @@ curl -u admin:admin \
 ---
 
 *Documentación actualizada: 2026-02-05*
-*Versión: 2.0 - Refactorización con OrderQueryHelper + arrays obligatorios*
+*Versión: 3.0 - Nuevas propiedades calculadas: @paidAmount, @status, @invoiceCreated, @hasVerifiedReturn, @hasNegativeLines, @isQuotation*
