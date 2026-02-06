@@ -6,6 +6,12 @@
  */
 package com.doceleguas.pos.webservices.orders;
 
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.ORDER_BASE_JOINS;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.replaceComputedProperties;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.rowToJson;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeOrderBy;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeSelectList;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -34,45 +40,6 @@ import com.doceleguas.pos.webservices.Model;
 public class OrdersFilterModel extends Model {
 
   private static final Logger log = LogManager.getLogger();
-  
-  // ============================================
-  // Computed Property SQL Expressions
-  // ============================================
-  
-  /**
-   * SQL subquery to calculate deliveryMode from order lines.
-   * Returns the maximum delivery mode, defaulting to 'PickAndCarry'.
-   * Equivalent to PaidReceiptsFilterProperties.deliveryMode
-   */
-  private static final String DELIVERY_MODE_SQL = 
-      "(SELECT COALESCE(MAX(ol.em_obrdm_delivery_mode), 'PickAndCarry') "
-      + "FROM c_orderline ol "
-      + "WHERE ol.c_order_id = ord.c_order_id "
-      + "AND COALESCE(ol.em_obpos_isdeleted, 'N') = 'N')";
-  
-  /**
-   * SQL subquery to calculate deliveryDate from order lines.
-   * Returns the minimum combined delivery date/time.
-   * Equivalent to PaidReceiptsFilterProperties.deliveryDate
-   */
-  private static final String DELIVERY_DATE_SQL = 
-      "(SELECT MIN(CASE "
-      + "WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_delivery_time IS NULL THEN NULL "
-      + "ELSE (ol.em_obrdm_delivery_date + ol.em_obrdm_delivery_time) "
-      + "END) "
-      + "FROM c_orderline ol "
-      + "WHERE ol.c_order_id = ord.c_order_id)";
-  
-  /**
-   * SQL CASE expression to determine orderType.
-   * Equivalent to PaidReceiptsFilterProperties.getOrderType() default case.
-   */
-  private static final String ORDER_TYPE_SQL = 
-      "(CASE "
-      + "WHEN doctype.isreturn = 'Y' THEN 'RET' "
-      + "WHEN doctype.docsubtypeso = 'OB' THEN 'QT' "
-      + "WHEN COALESCE(ord.em_obpos_islayaway, 'N') = 'Y' THEN 'LAY' "
-      + "ELSE 'ORD' END)";
 
   @Override
   public String getName() {
@@ -155,12 +122,7 @@ public class OrdersFilterModel extends Model {
     StringBuilder sql = new StringBuilder();
     sql.append("SELECT ").append(selectList);
     sql.append(" FROM c_order ord");
-    sql.append(" LEFT JOIN obpos_applications obpos ON ord.em_obpos_applications_id = obpos.obpos_applications_id");
-    sql.append(" LEFT JOIN ad_org org ON ord.ad_org_id = org.ad_org_id");
-    sql.append(" LEFT JOIN ad_org trxorg ON obpos.ad_org_id = trxorg.ad_org_id");
-    sql.append(" LEFT JOIN c_bpartner bp ON ord.c_bpartner_id = bp.c_bpartner_id");
-    sql.append(" LEFT JOIN ad_user salesrep ON ord.salesrep_id = salesrep.ad_user_id");
-    sql.append(" LEFT JOIN c_doctype doctype ON ord.c_doctypetarget_id = doctype.c_doctype_id");
+    sql.append(ORDER_BASE_JOINS);
     sql.append(" WHERE ord.ad_client_id = :clientId");
     sql.append(" AND ord.ad_org_id IN (SELECT ad_org_id FROM ad_org WHERE ad_org_id = :organizationId)");
     sql.append(" AND ord.em_obpos_isdeleted = 'N'");
@@ -242,93 +204,6 @@ public class OrdersFilterModel extends Model {
       default:
         return " AND (ord.docstatus <> 'CL' OR ord.iscancelled = 'Y')";
     }
-  }
-  
-  /**
-   * Sanitizes the SELECT list to prevent SQL injection.
-   * Removes dangerous SQL keywords while preserving valid column expressions.
-   * 
-   * @param selectList Raw SELECT list from request
-   * @return Sanitized SELECT list
-   */
-  private String sanitizeSelectList(String selectList) {
-    // Remove dangerous keywords
-    String regex = "(?i)\\b(update|delete|drop|insert|truncate|alter|exec|execute)\\b";
-    return selectList.replaceAll(regex, "").trim().replaceAll(" +", " ");
-  }
-  
-  /**
-   * Replaces computed property aliases with their SQL expressions.
-   * 
-   * <p>This method allows clients to request computed properties using simple aliases
-   * like "@deliveryMode", "@deliveryDate", "@orderType" instead of complex SQL subqueries.
-   * The aliases are replaced with their corresponding SQL expressions before query execution.</p>
-   * 
-   * <p>Supported computed properties:</p>
-   * <ul>
-   *   <li>{@code @deliveryMode} - Maximum delivery mode from order lines (default: 'PickAndCarry')</li>
-   *   <li>{@code @deliveryDate} - Minimum delivery date/time from order lines</li>
-   *   <li>{@code @orderType} - Calculated order type: 'ORD', 'RET', 'LAY', or 'QT'</li>
-   * </ul>
-   * 
-   * <p>Example selectList:</p>
-   * <pre>
-   * ord.documentno as "documentNo", @orderType as "orderType", @deliveryMode as "deliveryMode"
-   * </pre>
-   * 
-   * @param selectList The SELECT list potentially containing computed property aliases
-   * @return The SELECT list with aliases replaced by SQL expressions
-   */
-  private String replaceComputedProperties(String selectList) {
-    String result = selectList;
-    
-    // Replace @deliveryMode with the subquery
-    result = result.replaceAll("(?i)@deliveryMode", DELIVERY_MODE_SQL);
-    
-    // Replace @deliveryDate with the subquery
-    result = result.replaceAll("(?i)@deliveryDate", DELIVERY_DATE_SQL);
-    
-    // Replace @orderType with the CASE expression
-    result = result.replaceAll("(?i)@orderType", ORDER_TYPE_SQL);
-    
-    return result;
-  }
-  
-  /**
-   * Sanitizes the ORDER BY clause to prevent SQL injection.
-   * 
-   * @param orderBy Raw ORDER BY clause from request
-   * @return Sanitized ORDER BY clause
-   */
-  private String sanitizeOrderBy(String orderBy) {
-    if (orderBy == null || orderBy.isEmpty()) {
-      return "ord.created DESC";
-    }
-    // Only allow alphanumeric, dots, underscores, spaces, commas, and asc/desc
-    return orderBy.replaceAll("[^a-zA-Z0-9_.,\\s]", "").trim();
-  }
-  
-  /**
-   * Converts a result row Map to a JSON object.
-   * Handles null values and maintains column name casing.
-   * 
-   * @param rowMap Map of column names to values from the query result
-   * @return JSONObject with the row data
-   * @throws JSONException if JSON construction fails
-   */
-  @Override
-  public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
-    JSONObject json = new JSONObject();
-    for (Map.Entry<String, Object> entry : rowMap.entrySet()) {
-      Object value = entry.getValue();
-      // Handle null values
-      if (value == null) {
-        json.put(entry.getKey(), JSONObject.NULL);
-      } else {
-        json.put(entry.getKey(), value);
-      }
-    }
-    return json;
   }
   
   /**

@@ -64,16 +64,35 @@ com.doceleguas.pos.webservices/
                     ▼                                                 ▼
          ┌────────────────────┐                          ┌────────────────────┐
          │ OrdersFilterModel  │                          │    OrderModel      │
-         │ (filtros, paginac.)│                          │ (orderId/docNo)    │
+         │ (filtros, paginac.)│                          │ (orderId + arrays) │
          └────────────────────┘                          └────────────────────┘
                     │                                                 │
-                    └─────────────────┬───────────────────────────────┘
-                                      ▼
+                    └───────────────────┬─────────────────────────────┘
+                                        ▼
+                          ┌─────────────────────────────────────┐
+                          │         OrderQueryHelper             │
+                          │  (constantes SQL + métodos helper)   │
+                          └─────────────────────────────────────┘
+                                        │
+                                        ▼
                           ┌─────────────────────────────────────┐
                           │           C_Order (table)            │
                           │      + JOINs (bp, org, doctype...)   │
                           └─────────────────────────────────────┘
 ```
+
+### OrderQueryHelper - Componentes Compartidos
+
+| Tipo | Nombre | Descripción |
+|------|--------|-------------|
+| **Constante** | `DELIVERY_MODE_SQL` | Subquery para modo de entrega desde líneas |
+| **Constante** | `DELIVERY_DATE_SQL` | Subquery para fecha de entrega (PostgreSQL compatible) |
+| **Constante** | `ORDER_TYPE_SQL` | CASE expression para tipo de orden |
+| **Constante** | `ORDER_BASE_JOINS` | JOINs comunes para queries de órdenes |
+| **Método** | `sanitizeSelectList()` | Prevención de SQL injection en SELECT |
+| **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY |
+| **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL |
+| **Método** | `rowToJson()` | Conversión de Map a JSONObject |
 
 ---
 
@@ -322,5 +341,5 @@ curl -u admin:admin \
 
 ---
 
-*Documentación actualizada: 2025-02-04*
-*Versión: 4.0 - GetOrder + GetOrdersFilter con NativeQuery*
+*Documentación actualizada: 2026-02-05*
+*Versión: 5.0 - Refactorización con OrderQueryHelper*

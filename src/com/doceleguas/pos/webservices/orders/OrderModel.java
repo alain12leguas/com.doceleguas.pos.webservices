@@ -6,6 +6,11 @@
  */
 package com.doceleguas.pos.webservices.orders;
 
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.ORDER_BASE_JOINS;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.replaceComputedProperties;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.rowToJson;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeSelectList;
+
 import java.util.Map;
 
 import org.apache.logging.log4j.LogManager;
@@ -31,42 +36,6 @@ import com.doceleguas.pos.webservices.Model;
 public class OrderModel extends Model {
 
   private static final Logger log = LogManager.getLogger();
-  
-  // ============================================
-  // Computed Property SQL Expressions
-  // ============================================
-  
-  /**
-   * SQL subquery to calculate deliveryMode from order lines.
-   * Returns the maximum delivery mode, defaulting to 'PickAndCarry'.
-   */
-  private static final String DELIVERY_MODE_SQL = 
-      "(SELECT COALESCE(MAX(ol.em_obrdm_delivery_mode), 'PickAndCarry') "
-      + "FROM c_orderline ol "
-      + "WHERE ol.c_order_id = ord.c_order_id "
-      + "AND COALESCE(ol.em_obpos_isdeleted, 'N') = 'N')";
-  
-  /**
-   * SQL subquery to calculate deliveryDate from order lines.
-   * Returns the minimum combined delivery date/time.
-   */
-  private static final String DELIVERY_DATE_SQL = 
-      "(SELECT MIN(CASE "
-      + "WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_delivery_time IS NULL THEN NULL "
-      + "ELSE (ol.em_obrdm_delivery_date + ol.em_obrdm_delivery_time) "
-      + "END) "
-      + "FROM c_orderline ol "
-      + "WHERE ol.c_order_id = ord.c_order_id)";
-  
-  /**
-   * SQL CASE expression to determine orderType.
-   */
-  private static final String ORDER_TYPE_SQL = 
-      "(CASE "
-      + "WHEN doctype.isreturn = 'Y' THEN 'RET' "
-      + "WHEN doctype.docsubtypeso = 'OB' THEN 'QT' "
-      + "WHEN COALESCE(ord.em_obpos_islayaway, 'N') = 'Y' THEN 'LAY' "
-      + "ELSE 'ORD' END)";
 
   @Override
   public String getName() {
@@ -104,12 +73,7 @@ public class OrderModel extends Model {
     StringBuilder sql = new StringBuilder();
     sql.append("SELECT ").append(selectList);
     sql.append(" FROM c_order ord");
-    sql.append(" LEFT JOIN obpos_applications obpos ON ord.em_obpos_applications_id = obpos.obpos_applications_id");
-    sql.append(" LEFT JOIN ad_org org ON ord.ad_org_id = org.ad_org_id");
-    sql.append(" LEFT JOIN ad_org trxorg ON obpos.ad_org_id = trxorg.ad_org_id");
-    sql.append(" LEFT JOIN c_bpartner bp ON ord.c_bpartner_id = bp.c_bpartner_id");
-    sql.append(" LEFT JOIN ad_user salesrep ON ord.salesrep_id = salesrep.ad_user_id");
-    sql.append(" LEFT JOIN c_doctype doctype ON ord.c_doctypetarget_id = doctype.c_doctype_id");
+    sql.append(ORDER_BASE_JOINS);
     sql.append(" WHERE ord.ad_client_id = :clientId");
     
     // Add order identifier filter
@@ -138,57 +102,6 @@ public class OrderModel extends Model {
     }
     
     return query;
-  }
-  
-  /**
-   * Sanitizes the SELECT list to prevent SQL injection.
-   * Removes dangerous SQL keywords while preserving valid column expressions.
-   * 
-   * @param selectList Raw SELECT list from request
-   * @return Sanitized SELECT list
-   */
-  private String sanitizeSelectList(String selectList) {
-    // Remove dangerous keywords
-    String regex = "(?i)\\b(update|delete|drop|insert|truncate|alter|exec|execute)\\b";
-    return selectList.replaceAll(regex, "").trim().replaceAll(" +", " ");
-  }
-  
-  /**
-   * Replaces computed property aliases with their SQL expressions.
-   * Supports @orderType, @deliveryMode, @deliveryDate.
-   * 
-   * @param selectList The SELECT list potentially containing computed property aliases
-   * @return The SELECT list with aliases replaced by SQL expressions
-   */
-  private String replaceComputedProperties(String selectList) {
-    String result = selectList;
-    result = result.replaceAll("(?i)@deliveryMode", DELIVERY_MODE_SQL);
-    result = result.replaceAll("(?i)@deliveryDate", DELIVERY_DATE_SQL);
-    result = result.replaceAll("(?i)@orderType", ORDER_TYPE_SQL);
-    return result;
-  }
-  
-  /**
-   * Converts a result row Map to a JSON object.
-   * Handles null values and maintains column name casing.
-   * 
-   * @param rowMap Map of column names to values from the query result
-   * @return JSONObject with the row data
-   * @throws JSONException if JSON construction fails
-   */
-  @Override
-  public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
-    JSONObject json = new JSONObject();
-    for (Map.Entry<String, Object> entry : rowMap.entrySet()) {
-      Object value = entry.getValue();
-      // Handle null values
-      if (value == null) {
-        json.put(entry.getKey(), JSONObject.NULL);
-      } else {
-        json.put(entry.getKey(), value);
-      }
-    }
-    return json;
   }
   
   // ============================================

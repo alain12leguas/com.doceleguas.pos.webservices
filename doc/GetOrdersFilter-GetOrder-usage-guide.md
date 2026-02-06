@@ -183,7 +183,12 @@ END)
 ```sql
 (SELECT MIN(CASE 
   WHEN ol.em_obrdm_delivery_date IS NULL OR ol.em_obrdm_delivery_time IS NULL THEN NULL 
-  ELSE (ol.em_obrdm_delivery_date + ol.em_obrdm_delivery_time) 
+  ELSE to_timestamp(
+    to_char(ol.em_obrdm_delivery_date, 'YYYY') || '-' || 
+    to_char(ol.em_obrdm_delivery_date, 'MM') || '-' || 
+    to_char(ol.em_obrdm_delivery_date, 'DD') || ' ' || 
+    to_char(ol.em_obrdm_delivery_time, 'HH24') || ':' || 
+    to_char(ol.em_obrdm_delivery_time, 'MI'), 'YYYY-MM-DD HH24:MI') 
 END) 
 FROM c_orderline ol 
 WHERE ol.c_order_id = ord.c_order_id)
@@ -496,6 +501,37 @@ Ambos WebServices utilizan los siguientes JOINs que permiten acceder a columnas 
 
 ---
 
+## Arquitectura Interna
+
+### Estructura de Clases
+
+```
+com.doceleguas.pos.webservices/
+├── GetOrdersFilter.java          - WebService para múltiples órdenes
+├── GetOrder.java                 - WebService para una orden
+└── orders/
+    ├── OrderQueryHelper.java     - Clase utility (constantes + métodos compartidos)
+    ├── OrdersFilterModel.java    - Model para GetOrdersFilter
+    └── OrderModel.java           - Model para GetOrder con arrays
+```
+
+### OrderQueryHelper (Clase Utility)
+
+Esta clase centraliza código compartido entre `OrdersFilterModel` y `OrderModel`:
+
+| Componente | Tipo | Descripción |
+|------------|------|-------------|
+| `DELIVERY_MODE_SQL` | Constante | Subquery para modo de entrega |
+| `DELIVERY_DATE_SQL` | Constante | Subquery para fecha de entrega (PostgreSQL) |
+| `ORDER_TYPE_SQL` | Constante | CASE para tipo de orden |
+| `ORDER_BASE_JOINS` | Constante | JOINs comunes (bp, org, doctype, etc.) |
+| `sanitizeSelectList()` | Método | Prevención SQL injection en SELECT |
+| `sanitizeOrderBy()` | Método | Prevención SQL injection en ORDER BY |
+| `replaceComputedProperties()` | Método | Reemplazo de @alias → SQL |
+| `rowToJson()` | Método | Conversión Map → JSONObject |
+
+---
+
 ## Diferencias Clave vs PaidReceiptsFilter/PaidReceipts
 
 | Aspecto | PaidReceiptsFilter/PaidReceipts | GetOrdersFilter/GetOrder |
@@ -695,5 +731,5 @@ curl -u admin:admin \
 
 ---
 
-*Documentación actualizada: 2025-02-04*
-*Versión: 1.1*
+*Documentación actualizada: 2026-02-05*
+*Versión: 2.0 - Refactorización con OrderQueryHelper + arrays obligatorios*
