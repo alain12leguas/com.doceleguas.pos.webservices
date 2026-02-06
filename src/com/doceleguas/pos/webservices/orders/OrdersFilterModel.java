@@ -6,7 +6,16 @@
  */
 package com.doceleguas.pos.webservices.orders;
 
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.DELIVERY_DATE_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.DELIVERY_MODE_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.HAS_NEGATIVE_LINES_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.HAS_VERIFIED_RETURN_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.INVOICE_CREATED_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.IS_QUOTATION_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.ORDER_BASE_JOINS;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.ORDER_TYPE_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.PAID_AMOUNT_SQL;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.STATUS_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.replaceComputedProperties;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.rowToJson;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeOrderBy;
@@ -110,6 +119,11 @@ public class OrdersFilterModel extends Model {
           // Date range - to
           whereClause.append(" AND ord.dateordered <= :").append(column);
           filterParams.add(new FilterParam(column, java.sql.Date.valueOf(value)));
+        } else if (isComputedProperty(column)) {
+          // Computed properties: replace with their SQL expression
+          String computedSql = getComputedPropertySql(column);
+          whereClause.append(" AND ").append(computedSql).append(" = :").append(column);
+          filterParams.add(new FilterParam(column, value));
         } else {
           // All other columns use equals
           whereClause.append(" AND ord.").append(column).append(" = :").append(column);
@@ -203,6 +217,68 @@ public class OrdersFilterModel extends Model {
             + " AND ord.docstatus <> 'CL'";
       default:
         return " AND (ord.docstatus <> 'CL' OR ord.iscancelled = 'Y')";
+    }
+  }
+  
+  /**
+   * Checks if the given column name is a computed property.
+   * 
+   * <p>Computed properties are virtual columns calculated from SQL expressions
+   * rather than actual database columns. They use the @alias pattern in selectList
+   * but can also be used as filters without the @ prefix.</p>
+   * 
+   * @param column The column name to check (lowercase)
+   * @return true if the column is a computed property
+   */
+  private boolean isComputedProperty(String column) {
+    switch (column) {
+      case "status":
+      case "paidamount":
+      case "invoicecreated":
+      case "hasverifiedreturn":
+      case "hasnegativelines":
+      case "isquotation":
+      case "deliverymode":
+      case "deliverydate":
+      // Note: ordertype is handled separately in the filter logic
+        return true;
+      default:
+        return false;
+    }
+  }
+  
+  /**
+   * Gets the SQL expression for a computed property.
+   * 
+   * <p>Returns the appropriate SQL constant from OrderQueryHelper
+   * that corresponds to the computed property name.</p>
+   * 
+   * @param column The computed property name (lowercase)
+   * @return The SQL expression for the computed property
+   * @throws IllegalArgumentException if the column is not a valid computed property
+   */
+  private String getComputedPropertySql(String column) {
+    switch (column) {
+      case "status":
+        return STATUS_SQL;
+      case "paidamount":
+        return PAID_AMOUNT_SQL;
+      case "invoicecreated":
+        return INVOICE_CREATED_SQL;
+      case "hasverifiedreturn":
+        return HAS_VERIFIED_RETURN_SQL;
+      case "hasnegativelines":
+        return HAS_NEGATIVE_LINES_SQL;
+      case "isquotation":
+        return IS_QUOTATION_SQL;
+      case "deliverymode":
+        return DELIVERY_MODE_SQL;
+      case "deliverydate":
+        return DELIVERY_DATE_SQL;
+      case "ordertype":
+        return ORDER_TYPE_SQL;
+      default:
+        throw new IllegalArgumentException("Unknown computed property: " + column);
     }
   }
   
