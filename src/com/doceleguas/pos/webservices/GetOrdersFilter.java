@@ -65,6 +65,11 @@ public class GetOrdersFilter implements WebService {
       
       // Create and execute the query
       OrdersFilterModel ordersFilterModel = new OrdersFilterModel();
+      
+      // First, get the total count for pagination (without limit/offset)
+      long totalCount = ordersFilterModel.getTotalCount(jsonParams);
+      
+      // Then execute the paginated query
       NativeQuery<?> query = ordersFilterModel.createQuery(jsonParams);
       
       // Execute with scrollable results for memory efficiency
@@ -90,11 +95,20 @@ public class GetOrdersFilter implements WebService {
         scroll.close();
       }
       
-      // Build response
+      // Build response with pagination info
+      long limit = jsonParams.optLong("limit", 1000);
+      long offset = jsonParams.optLong("offset", 0);
+      
       JSONObject responseJson = new JSONObject();
       responseJson.put("success", true);
       responseJson.put("data", dataArray);
-      responseJson.put("totalRows", rowCount);
+      
+      // Pagination fields for lazy loading support
+      responseJson.put("totalRows", totalCount);           // Total matching records (without limit)
+      responseJson.put("returnedRows", rowCount);          // Rows returned in this response
+      responseJson.put("limit", limit);                    // Limit applied
+      responseJson.put("offset", offset);                  // Offset applied
+      responseJson.put("hasMore", offset + rowCount < totalCount);  // More pages available
       
       response.getWriter().write(responseJson.toString());
       

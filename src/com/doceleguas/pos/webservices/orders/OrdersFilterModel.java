@@ -83,6 +83,92 @@ public class OrdersFilterModel extends Model {
     Long limit = jsonParams.optLong("limit", 1000);
     Long offset = jsonParams.optLong("offset", 0);
     String orderBy = jsonParams.optString("orderBy", "ord.created DESC");
+    
+    // Build WHERE clause and collect filter parameters
+    QueryComponents components = buildQueryComponents(jsonParams);
+    
+    // Build the SQL query
+    StringBuilder sql = new StringBuilder();
+    sql.append("SELECT ").append(selectList);
+    sql.append(" FROM c_order ord");
+    sql.append(ORDER_BASE_JOINS);
+    sql.append(components.whereClause);
+    
+    // Add ORDER BY and pagination
+    sql.append(" ORDER BY ").append(sanitizeOrderBy(orderBy));
+    sql.append(" LIMIT :limit OFFSET :offset");
+    
+    log.debug("OrderModel SQL: {}", sql.toString());
+    
+    // Create and configure the query
+    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql.toString());
+    query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
+    
+    // Set parameters
+    query.setParameter("clientId", components.clientId);
+    query.setParameter("organizationId", components.organizationId);
+    query.setParameter("limit", limit);
+    query.setParameter("offset", offset);
+    
+    // Set filter parameters
+    for (FilterParam fp : components.filterParams) {
+      query.setParameter(fp.name, fp.value);
+    }
+    
+    return query;
+  }
+  
+  /**
+   * Creates a COUNT query to get total number of matching records without pagination.
+   * 
+   * <p>This is used for proper pagination support - the consumer needs to know
+   * the total number of records that match the filters to implement lazy loading.</p>
+   * 
+   * @param jsonParams JSON object with filters (same as createQuery)
+   * @return The total count of matching records
+   * @throws JSONException if JSON parsing fails
+   */
+  public long getTotalCount(JSONObject jsonParams) throws JSONException {
+    // Build WHERE clause and collect filter parameters
+    QueryComponents components = buildQueryComponents(jsonParams);
+    
+    // Build the COUNT query (no ORDER BY, LIMIT, OFFSET needed)
+    StringBuilder sql = new StringBuilder();
+    sql.append("SELECT COUNT(*) FROM c_order ord");
+    sql.append(ORDER_BASE_JOINS);
+    sql.append(components.whereClause);
+    
+    log.debug("OrderModel COUNT SQL: {}", sql.toString());
+    
+    // Create and configure the query
+    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql.toString());
+    
+    // Set parameters
+    query.setParameter("clientId", components.clientId);
+    query.setParameter("organizationId", components.organizationId);
+    
+    // Set filter parameters
+    for (FilterParam fp : components.filterParams) {
+      query.setParameter(fp.name, fp.value);
+    }
+    
+    // Execute and return count
+    Object result = query.uniqueResult();
+    if (result instanceof Number) {
+      return ((Number) result).longValue();
+    }
+    return 0L;
+  }
+  
+  /**
+   * Builds the common query components (WHERE clause, parameters) used by both
+   * the data query and the count query.
+   * 
+   * @param jsonParams JSON object with filters and security parameters
+   * @return QueryComponents containing WHERE clause and parameters
+   * @throws JSONException if JSON parsing fails
+   */
+  private QueryComponents buildQueryComponents(JSONObject jsonParams) throws JSONException {
     String clientId = jsonParams.getString("client");
     String organizationId = jsonParams.getString("organization");
     
@@ -93,6 +179,13 @@ public class OrdersFilterModel extends Model {
     // Build dynamic WHERE clause
     StringBuilder whereClause = new StringBuilder();
     List<FilterParam> filterParams = new ArrayList<>();
+    
+    // Base WHERE conditions
+    whereClause.append(" WHERE ord.ad_client_id = :clientId");
+    whereClause.append(" AND ord.ad_org_id IN (SELECT ad_org_id FROM ad_org WHERE ad_org_id = :organizationId)");
+    whereClause.append(" AND ord.em_obpos_isdeleted = 'N'");
+    whereClause.append(" AND ord.em_obpos_applications_id IS NOT NULL");
+    whereClause.append(" AND ord.docstatus NOT IN ('CJ', 'CA', 'NC', 'AE', 'ME')");
     
     if (filters != null) {
       for (int i = 0; i < filters.length(); i++) {
@@ -132,45 +225,28 @@ public class OrdersFilterModel extends Model {
       }
     }
     
-    // Build the SQL query
-    StringBuilder sql = new StringBuilder();
-    sql.append("SELECT ").append(selectList);
-    sql.append(" FROM c_order ord");
-    sql.append(ORDER_BASE_JOINS);
-    sql.append(" WHERE ord.ad_client_id = :clientId");
-    sql.append(" AND ord.ad_org_id IN (SELECT ad_org_id FROM ad_org WHERE ad_org_id = :organizationId)");
-    sql.append(" AND ord.em_obpos_isdeleted = 'N'");
-    sql.append(" AND ord.em_obpos_applications_id IS NOT NULL");
-    sql.append(" AND ord.docstatus NOT IN ('CJ', 'CA', 'NC', 'AE', 'ME')");
-    
     // Add order type specific conditions
-    sql.append(getOrderTypeSql(orderTypeFilter));
+    whereClause.append(getOrderTypeSql(orderTypeFilter));
     
-    // Add dynamic filters
-    sql.append(whereClause);
+    return new QueryComponents(whereClause.toString(), filterParams, clientId, organizationId);
+  }
+  
+  /**
+   * Container class for query components shared between data and count queries.
+   */
+  private static class QueryComponents {
+    final String whereClause;
+    final List<FilterParam> filterParams;
+    final String clientId;
+    final String organizationId;
     
-    // Add ORDER BY and pagination
-    sql.append(" ORDER BY ").append(sanitizeOrderBy(orderBy));
-    sql.append(" LIMIT :limit OFFSET :offset");
-    
-    log.debug("OrderModel SQL: {}", sql.toString());
-    
-    // Create and configure the query
-    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql.toString());
-    query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
-    
-    // Set parameters
-    query.setParameter("clientId", clientId);
-    query.setParameter("organizationId", organizationId);
-    query.setParameter("limit", limit);
-    query.setParameter("offset", offset);
-    
-    // Set filter parameters
-    for (FilterParam fp : filterParams) {
-      query.setParameter(fp.name, fp.value);
+    QueryComponents(String whereClause, List<FilterParam> filterParams, 
+                    String clientId, String organizationId) {
+      this.whereClause = whereClause;
+      this.filterParams = filterParams;
+      this.clientId = clientId;
+      this.organizationId = organizationId;
     }
-    
-    return query;
   }
   
   /**

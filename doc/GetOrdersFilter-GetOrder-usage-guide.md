@@ -43,6 +43,97 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
 
 ---
 
+## Paginación y Lazy Loading
+
+El WebService soporta paginación completa para implementar lazy loading en el cliente. La respuesta incluye información de paginación que permite al consumidor (OCRE-POS) saber cuántas páginas hay en total y si debe seguir cargando más datos.
+
+### Campos de Respuesta para Paginación
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `totalRows` | Integer | **Total de registros** que coinciden con los filtros (sin limit) |
+| `returnedRows` | Integer | Número de filas devueltas en esta respuesta |
+| `limit` | Integer | El limit aplicado en esta request |
+| `offset` | Integer | El offset aplicado en esta request |
+| `hasMore` | Boolean | `true` si hay más páginas disponibles |
+
+### Ejemplo de Flujo de Paginación
+
+**Request 1** - Primera página:
+```
+GET /ws/GetOrdersFilter?...&limit=100&offset=0
+```
+```json
+{
+  "success": true,
+  "data": [...100 items...],
+  "totalRows": 350,
+  "returnedRows": 100,
+  "limit": 100,
+  "offset": 0,
+  "hasMore": true
+}
+```
+
+**Request 2** - Segunda página:
+```
+GET /ws/GetOrdersFilter?...&limit=100&offset=100
+```
+```json
+{
+  "success": true,
+  "data": [...100 items...],
+  "totalRows": 350,
+  "returnedRows": 100,
+  "limit": 100,
+  "offset": 100,
+  "hasMore": true
+}
+```
+
+**Request 4** - Última página:
+```
+GET /ws/GetOrdersFilter?...&limit=100&offset=300
+```
+```json
+{
+  "success": true,
+  "data": [...50 items...],
+  "totalRows": 350,
+  "returnedRows": 50,
+  "limit": 100,
+  "offset": 300,
+  "hasMore": false
+}
+```
+
+### Implementación en el Cliente (Pseudocódigo)
+
+```javascript
+async function loadAllOrders(filters) {
+  const limit = 100;
+  let offset = 0;
+  let allOrders = [];
+  let hasMore = true;
+  
+  while (hasMore) {
+    const response = await fetch(`/ws/GetOrdersFilter?...&limit=${limit}&offset=${offset}`);
+    const json = await response.json();
+    
+    allOrders = allOrders.concat(json.data);
+    hasMore = json.hasMore;
+    offset += json.returnedRows;
+    
+    // Opcional: actualizar progreso en UI
+    updateProgress(allOrders.length, json.totalRows);
+  }
+  
+  return allOrders;
+}
+```
+
+---
+
 ## Filtros Soportados
 
 Los filtros se envían como parámetros URL con el prefijo `f.`:
@@ -310,7 +401,7 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
   &orderBy=ord.created DESC
 ```
 
-### Response (con propiedades calculadas)
+### Response (con propiedades calculadas y paginación)
 ```json
 {
   "success": true,
@@ -790,5 +881,5 @@ curl -u admin:admin \
 
 ---
 
-*Documentación actualizada: 2026-02-06*
-*Versión: 3.1 - Soporte para filtros de propiedades calculadas (f.status, f.paidamount, etc.)*
+*Documentación actualizada: 2026-02-09*
+*Versión: 4.0 - Soporte completo para paginación (totalRows, returnedRows, hasMore)*

@@ -101,6 +101,8 @@ com.doceleguas.pos.webservices/
 | **Método** | `rowToJson()` | Conversión de Map a JSONObject |
 | **Método** | `isComputedProperty()` | Detecta si un filtro es propiedad calculada (en OrdersFilterModel) |
 | **Método** | `getComputedPropertySql()` | Obtiene SQL de propiedad calculada para filtros (en OrdersFilterModel) |
+| **Método** | `getTotalCount()` | Ejecuta COUNT query para obtener total de registros (paginación) |
+| **Método** | `buildQueryComponents()` | Construye WHERE clause y parámetros compartidos entre queries |
 
 ---
 
@@ -202,6 +204,22 @@ GET /ws/com.doceleguas.pos.webservices.GetOrdersFilter
 ```
 
 ## Respuesta
+
+La respuesta incluye campos de paginación para soporte de lazy loading:
+
+```json
+{
+  "success": true,
+  "data": [...],
+  "totalRows": 350,       // Total de registros que coinciden con los filtros (sin limit)
+  "returnedRows": 100,    // Filas devueltas en esta respuesta
+  "limit": 100,           // Limit aplicado
+  "offset": 0,            // Offset aplicado
+  "hasMore": true         // Indica si hay más páginas disponibles
+}
+```
+
+### Ejemplo de Respuesta Completa
 
 ```json
 {
@@ -370,5 +388,5 @@ curl -u admin:admin \
 
 ---
 
-*Documentación actualizada: 2026-02-06*
-*Versión: 6.1 - Soporte para filtros de propiedades calculadas (f.status, f.paidamount, etc.)*
+*Documentación actualizada: 2026-02-09*
+*Versión: 7.0 - Soporte completo para paginación (totalRows real, returnedRows, hasMore)*
