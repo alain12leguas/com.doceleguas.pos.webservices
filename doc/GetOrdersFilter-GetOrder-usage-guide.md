@@ -38,30 +38,46 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
 | Parámetro | Tipo | Default | Descripción |
 |-----------|------|---------|-------------|
 | `limit` | Integer | 1000 | Máximo de filas a devolver |
-| `offset` | Integer | 0 | Filas a saltar (paginación) |
-| `orderBy` | String | `ord.created DESC` | Cláusula ORDER BY |
+| `lastId` | UUID | *(ninguno)* | ID de la última orden recibida (paginación keyset) |
+| `orderBy` | String | *(ninguno)* | Cláusula ORDER BY (prepended a `ord.c_order_id`) |
 
 ---
 
-## Paginación y Lazy Loading
+## Paginación Keyset y Lazy Loading
 
-El WebService soporta paginación completa para implementar lazy loading en el cliente. La respuesta incluye información de paginación que permite al consumidor (OCRE-POS) saber cuántas páginas hay en total y si debe seguir cargando más datos.
+El WebService utiliza **paginación keyset (cursor-based)** con el parámetro `lastId`, siguiendo el mismo patrón que los modelos de MasterData (OCProduct, etc.). Este enfoque es más eficiente que `OFFSET` porque PostgreSQL no necesita escanear y descartar filas.
+
+### Cómo Funciona
+
+1. **Primera request**: Sin `lastId`, devuelve los primeros `limit` registros
+2. **Siguientes requests**: Se envía `lastId` con el valor del campo `lastId` de la respuesta anterior
+3. El servidor filtra con `WHERE ord.c_order_id > :lastId` y devuelve el siguiente lote
+4. El campo `hasMore` indica si hay más páginas disponibles
+
+### Orden de Resultados
+
+- Si se proporciona `orderBy`, se usa como **primer criterio** de ordenación
+- `ord.c_order_id` se añade **siempre al final** como criterio de desempate para garantizar cursores estables
+- Si no se proporciona `orderBy`: `ORDER BY ord.c_order_id`
+- Si se proporciona `orderBy=ord.created DESC`: `ORDER BY ord.created DESC, ord.c_order_id`
+
+> **Nota técnica**: Para paginación correcta al 100%, el `orderBy` debería alinearse con `ord.c_order_id` ascendente. Usar un `orderBy` personalizado junto con `lastId` puede producir resultados desordenados entre páginas, ya que el cursor solo rastrea el `c_order_id`. Para lazy loading donde se cargan TODOS los registros, esto es generalmente aceptable.
 
 ### Campos de Respuesta para Paginación
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `totalRows` | Integer | **Total de registros** que coinciden con los filtros (sin limit) |
+| `totalRows` | Integer | **Total de registros** que coinciden con los filtros (sin limit/lastId) |
 | `returnedRows` | Integer | Número de filas devueltas en esta respuesta |
 | `limit` | Integer | El limit aplicado en esta request |
-| `offset` | Integer | El offset aplicado en esta request |
+| `lastId` | UUID | `c_order_id` de la última fila devuelta (cursor para siguiente página) |
 | `hasMore` | Boolean | `true` si hay más páginas disponibles |
 
-### Ejemplo de Flujo de Paginación
+### Ejemplo de Flujo de Paginación Keyset
 
-**Request 1** - Primera página:
+**Request 1** - Primera página (sin lastId):
 ```
-GET /ws/GetOrdersFilter?...&limit=100&offset=0
+GET /ws/GetOrdersFilter?...&limit=100
 ```
 ```json
 {
@@ -70,14 +86,14 @@ GET /ws/GetOrdersFilter?...&limit=100&offset=0
   "totalRows": 350,
   "returnedRows": 100,
   "limit": 100,
-  "offset": 0,
+  "lastId": "5A3B72C8D1E4F09A6B2C83D94E5F0A1B",
   "hasMore": true
 }
 ```
 
-**Request 2** - Segunda página:
+**Request 2** - Segunda página (lastId de la respuesta anterior):
 ```
-GET /ws/GetOrdersFilter?...&limit=100&offset=100
+GET /ws/GetOrdersFilter?...&limit=100&lastId=5A3B72C8D1E4F09A6B2C83D94E5F0A1B
 ```
 ```json
 {
@@ -86,14 +102,14 @@ GET /ws/GetOrdersFilter?...&limit=100&offset=100
   "totalRows": 350,
   "returnedRows": 100,
   "limit": 100,
-  "offset": 100,
+  "lastId": "B8D4E612F3A5069C7D3E94A05F6B1C2D",
   "hasMore": true
 }
 ```
 
 **Request 4** - Última página:
 ```
-GET /ws/GetOrdersFilter?...&limit=100&offset=300
+GET /ws/GetOrdersFilter?...&limit=100&lastId=E1F5A823B4C6D09D8E4F05B16C7D2E3F
 ```
 ```json
 {
@@ -102,7 +118,7 @@ GET /ws/GetOrdersFilter?...&limit=100&offset=300
   "totalRows": 350,
   "returnedRows": 50,
   "limit": 100,
-  "offset": 300,
+  "lastId": "F2A6B934C5D7E10E9F5A16C27D8E3F4A",
   "hasMore": false
 }
 ```
@@ -112,17 +128,22 @@ GET /ws/GetOrdersFilter?...&limit=100&offset=300
 ```javascript
 async function loadAllOrders(filters) {
   const limit = 100;
-  let offset = 0;
+  let lastId = null;
   let allOrders = [];
   let hasMore = true;
   
   while (hasMore) {
-    const response = await fetch(`/ws/GetOrdersFilter?...&limit=${limit}&offset=${offset}`);
+    let url = `/ws/GetOrdersFilter?...&limit=${limit}`;
+    if (lastId) {
+      url += `&lastId=${lastId}`;
+    }
+    
+    const response = await fetch(url);
     const json = await response.json();
     
     allOrders = allOrders.concat(json.data);
     hasMore = json.hasMore;
-    offset += json.returnedRows;
+    lastId = json.lastId;  // Cursor para la siguiente página
     
     // Opcional: actualizar progreso en UI
     updateProgress(allOrders.length, json.totalRows);
@@ -397,11 +418,10 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
   &f.documentno=VBS2
   &f.ordertype=ORD
   &limit=50
-  &offset=0
   &orderBy=ord.created DESC
 ```
 
-### Response (con propiedades calculadas y paginación)
+### Response (con propiedades calculadas y paginación keyset)
 ```json
 {
   "success": true,
@@ -417,7 +437,11 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
       "deliveryDate": "2026-02-05T14:30:00"
     }
   ],
-  "totalRows": 1
+  "totalRows": 1,
+  "returnedRows": 1,
+  "limit": 50,
+  "lastId": "F5B00821E0F32EAFF8BD0792B1B68BE0",
+  "hasMore": false
 }
 ```
 
@@ -676,7 +700,7 @@ Esta clase centraliza código compartido entre `OrdersFilterModel` y `OrderModel
 | `ORDER_TYPE_SQL` | Constante | CASE para tipo de orden |
 | `ORDER_BASE_JOINS` | Constante | JOINs comunes (bp, org, doctype, etc.) |
 | `sanitizeSelectList()` | Método | Prevención SQL injection en SELECT |
-| `sanitizeOrderBy()` | Método | Prevención SQL injection en ORDER BY |
+| `sanitizeOrderBy()` | Método | Prevención SQL injection en ORDER BY (usado por OrderModel) |
 | `replaceComputedProperties()` | Método | Reemplazo de @alias → SQL |
 | `rowToJson()` | Método | Conversión Map → JSONObject |
 
@@ -882,4 +906,4 @@ curl -u admin:admin \
 ---
 
 *Documentación actualizada: 2026-02-09*
-*Versión: 4.0 - Soporte completo para paginación (totalRows, returnedRows, hasMore)*
+*Versión: 5.0 - Paginación keyset con lastId (reemplaza offset), optimización de query*

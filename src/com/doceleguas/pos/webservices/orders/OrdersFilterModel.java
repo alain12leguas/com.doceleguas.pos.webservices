@@ -18,7 +18,6 @@ import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.PAID_AMOUNT
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.STATUS_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.replaceComputedProperties;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.rowToJson;
-import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeOrderBy;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeSelectList;
 
 import java.util.ArrayList;
@@ -58,14 +57,23 @@ public class OrdersFilterModel extends Model {
   /**
    * Creates a native SQL query for orders based on the provided parameters.
    * 
+   * <p>Uses keyset (cursor-based) pagination with {@code lastId} parameter, following
+   * the same pattern as {@link com.doceleguas.pos.webservices.OCProduct OCProduct}
+   * and other MasterData models. This is more efficient than OFFSET-based pagination
+   * because PostgreSQL doesn't need to scan and discard rows.</p>
+   * 
+   * <p>The query always includes {@code ord.c_order_id} as {@code __lastid} in the
+   * SELECT for cursor tracking, and always appends {@code ord.c_order_id} as the
+   * last ORDER BY column to ensure stable pagination.</p>
+   * 
    * @param jsonParams JSON object containing:
    *   <ul>
    *     <li>selectList: SQL SELECT columns (required)</li>
    *     <li>filters: JSONArray of {column, value} objects</li>
    *     <li>orderType: Order type filter (ORD, RET, LAY, etc.)</li>
    *     <li>limit: Maximum rows to return</li>
-   *     <li>offset: Rows to skip</li>
-   *     <li>orderBy: ORDER BY clause</li>
+   *     <li>lastId: c_order_id of the last row from previous page (optional)</li>
+   *     <li>orderBy: ORDER BY clause (optional)</li>
    *     <li>client: Client ID for security filter</li>
    *     <li>organization: Organization ID for security filter</li>
    *   </ul>
@@ -81,24 +89,39 @@ public class OrdersFilterModel extends Model {
     // Replace computed property aliases with their SQL expressions
     selectList = replaceComputedProperties(selectList);
     Long limit = jsonParams.optLong("limit", 1000);
-    Long offset = jsonParams.optLong("offset", 0);
-    String orderBy = jsonParams.optString("orderBy", "ord.created DESC");
+    String orderBy = jsonParams.optString("orderBy", "");
+    String lastId = jsonParams.optString("lastId", null);
     
     // Build WHERE clause and collect filter parameters
     QueryComponents components = buildQueryComponents(jsonParams);
     
     // Build the SQL query
+    // Always include c_order_id as __lastid for cursor-based pagination tracking
     StringBuilder sql = new StringBuilder();
-    sql.append("SELECT ").append(selectList);
+    sql.append("SELECT ord.c_order_id AS __lastid, ").append(selectList);
     sql.append(" FROM c_order ord");
     sql.append(ORDER_BASE_JOINS);
     sql.append(components.whereClause);
     
-    // Add ORDER BY and pagination
-    sql.append(" ORDER BY ").append(sanitizeOrderBy(orderBy));
-    sql.append(" LIMIT :limit OFFSET :offset");
+    // Keyset pagination: skip rows already retrieved in previous pages
+    if (lastId != null && !lastId.isEmpty()) {
+      sql.append(" AND ord.c_order_id > :lastId");
+    }
     
-    log.debug("OrderModel SQL: {}", sql.toString());
+    // ORDER BY: user orderBy first (if provided), always c_order_id last for stable pagination
+    sql.append(" ORDER BY ");
+    if (orderBy != null && !orderBy.isEmpty()) {
+      // Sanitize: only allow safe characters for SQL ORDER BY
+      String sanitized = orderBy.replaceAll("[^a-zA-Z0-9_.,\\s]", "").trim();
+      if (!sanitized.isEmpty()) {
+        sql.append(sanitized).append(", ");
+      }
+    }
+    sql.append("ord.c_order_id");
+    
+    sql.append(" LIMIT :limit");
+    
+    log.debug("OrdersFilterModel SQL: {}", sql.toString());
     
     // Create and configure the query
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql.toString());
@@ -108,7 +131,10 @@ public class OrdersFilterModel extends Model {
     query.setParameter("clientId", components.clientId);
     query.setParameter("organizationId", components.organizationId);
     query.setParameter("limit", limit);
-    query.setParameter("offset", offset);
+    
+    if (lastId != null && !lastId.isEmpty()) {
+      query.setParameter("lastId", lastId);
+    }
     
     // Set filter parameters
     for (FilterParam fp : components.filterParams) {
@@ -182,7 +208,7 @@ public class OrdersFilterModel extends Model {
     
     // Base WHERE conditions
     whereClause.append(" WHERE ord.ad_client_id = :clientId");
-    whereClause.append(" AND ord.ad_org_id IN (SELECT ad_org_id FROM ad_org WHERE ad_org_id = :organizationId)");
+    whereClause.append(" AND ord.ad_org_id = :organizationId");
     whereClause.append(" AND ord.em_obpos_isdeleted = 'N'");
     whereClause.append(" AND ord.em_obpos_applications_id IS NOT NULL");
     whereClause.append(" AND ord.docstatus NOT IN ('CJ', 'CA', 'NC', 'AE', 'ME')");

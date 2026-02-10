@@ -96,7 +96,7 @@ com.doceleguas.pos.webservices/
 | **Constante** | `IS_QUOTATION_SQL` | CASE para verificar si es cotización |
 | **Constante** | `ORDER_BASE_JOINS` | JOINs comunes para queries de órdenes |
 | **Método** | `sanitizeSelectList()` | Prevención de SQL injection en SELECT |
-| **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY |
+| **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY (usado por OrderModel) |
 | **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL (9 propiedades) |
 | **Método** | `rowToJson()` | Conversión de Map a JSONObject |
 | **Método** | `isComputedProperty()` | Detecta si un filtro es propiedad calculada (en OrdersFilterModel) |
@@ -129,8 +129,8 @@ Consultar **múltiples órdenes** aplicando filtros dinámicos, con soporte para
 | Parámetro | Tipo | Default | Descripción |
 |-----------|------|---------|-------------|
 | `limit` | Integer | 1000 | Máximo de filas a devolver |
-| `offset` | Integer | 0 | Filas a saltar (paginación) |
-| `orderBy` | String | ord.created DESC | Cláusula ORDER BY |
+| `lastId` | UUID | *(ninguno)* | ID de la última orden recibida (cursor para paginación keyset) |
+| `orderBy` | String | *(ninguno)* | Cláusula ORDER BY (prepended a `ord.c_order_id`) |
 
 ## Sintaxis de Filtros
 
@@ -205,19 +205,26 @@ GET /ws/com.doceleguas.pos.webservices.GetOrdersFilter
 
 ## Respuesta
 
-La respuesta incluye campos de paginación para soporte de lazy loading:
+La respuesta incluye campos de **paginación keyset** (cursor-based) para soporte de lazy loading:
 
 ```json
 {
   "success": true,
   "data": [...],
-  "totalRows": 350,       // Total de registros que coinciden con los filtros (sin limit)
+  "totalRows": 350,       // Total de registros que coinciden con los filtros
   "returnedRows": 100,    // Filas devueltas en esta respuesta
   "limit": 100,           // Limit aplicado
-  "offset": 0,            // Offset aplicado
+  "lastId": "5A3B...",    // c_order_id de la última fila (cursor para siguiente request)
   "hasMore": true         // Indica si hay más páginas disponibles
 }
 ```
+
+#### Método de Paginación
+
+- **Keyset pagination**: Usa `WHERE ord.c_order_id > :lastId` en lugar de `OFFSET` (más eficiente en PostgreSQL)
+- **ORDER BY**: Siempre incluye `ord.c_order_id` como último criterio para cursores estables
+- **totalRows**: Se obtiene con COUNT query separado (no afectado por lastId)
+- **hasMore**: `true` cuando `returnedRows >= limit`
 
 ### Ejemplo de Respuesta Completa
 
@@ -389,4 +396,4 @@ curl -u admin:admin \
 ---
 
 *Documentación actualizada: 2026-02-09*
-*Versión: 7.0 - Soporte completo para paginación (totalRows real, returnedRows, hasMore)*
+*Versión: 8.0 - Paginación keyset con lastId (reemplaza offset), optimización de query (org filter)*
