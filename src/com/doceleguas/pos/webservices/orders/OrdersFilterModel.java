@@ -155,9 +155,13 @@ public class OrdersFilterModel extends Model {
     if (hasCursor) {
       // For DESC: (col < :lastSortValue OR (col = :lastSortValue AND id < :lastId))
       // For ASC:  (col > :lastSortValue OR (col = :lastSortValue AND id > :lastId))
+      // The CAST is required because :lastSortValue arrives as varchar from the HTTP request,
+      // and PostgreSQL won't auto-cast varchar to timestamp/numeric/etc.
       String cmp = isDesc ? "<" : ">";
-      sql.append(" AND (").append(sortColumnSql).append(" ").append(cmp).append(" :lastSortValue");
-      sql.append(" OR (").append(sortColumnSql).append(" = :lastSortValue");
+      String castType = getSortColumnCastType(sortColumn);
+      String castedParam = "CAST(:lastSortValue AS " + castType + ")";
+      sql.append(" AND (").append(sortColumnSql).append(" ").append(cmp).append(" ").append(castedParam);
+      sql.append(" OR (").append(sortColumnSql).append(" = ").append(castedParam);
       sql.append(" AND ord.c_order_id ").append(cmp).append(" :lastId))");
     }
     
@@ -429,6 +433,50 @@ public class OrdersFilterModel extends Model {
       default:
         throw new IllegalArgumentException("Unknown computed property: " + column);
     }
+  }
+  
+  /**
+   * Determines the PostgreSQL CAST type for the sort column's :lastSortValue parameter.
+   * 
+   * <p>The lastSortValue always arrives as a String from the HTTP request. When
+   * the sort column is a timestamp, numeric, etc., PostgreSQL requires an explicit CAST
+   * because it won't auto-cast varchar to other types.</p>
+   * 
+   * @param sortColumn The original sort column name (before computed property replacement)
+   * @return The PostgreSQL type name to use in CAST(:lastSortValue AS ...)
+   */
+  private static String getSortColumnCastType(String sortColumn) {
+    String lower = sortColumn.toLowerCase().trim();
+    
+    // Computed properties - known return types
+    if (lower.startsWith("@")) {
+      switch (lower) {
+        case "@deliverydate":
+          return "timestamp";
+        case "@paidamount":
+          return "numeric";
+        case "@invoicecreated":
+        case "@hasverifiedreturn":
+        case "@hasnegativelines":
+        case "@isquotation":
+          return "boolean";
+        default:
+          // @orderType, @deliveryMode, @status -> text
+          return "text";
+      }
+    }
+    
+    // Regular columns - infer from common naming patterns
+    if (lower.contains("created") || lower.contains("updated") || lower.contains("date")) {
+      return "timestamp";
+    }
+    if (lower.contains("total") || lower.contains("amount") || lower.contains("qty")
+        || lower.contains("price")) {
+      return "numeric";
+    }
+    
+    // Default: text (safe for varchar/char columns)
+    return "text";
   }
   
   /**
