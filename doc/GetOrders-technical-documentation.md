@@ -96,8 +96,8 @@ com.doceleguas.pos.webservices/
 | **Constante** | `IS_QUOTATION_SQL` | CASE para verificar si es cotización |
 | **Constante** | `ORDER_BASE_JOINS` | JOINs comunes para queries de órdenes |
 | **Método** | `sanitizeSelectList()` | Prevención de SQL injection en SELECT |
-| **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY (usado por OrderModel) |
-| **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL (9 propiedades) |
+| **Método** | `sanitizeOrderBy()` | Prevención de SQL injection en ORDER BY |
+| **Método** | `replaceComputedProperties()` | Reemplazo de @alias por expresiones SQL en SELECT y ORDER BY (9 propiedades) |
 | **Método** | `rowToJson()` | Conversión de Map a JSONObject |
 | **Método** | `isComputedProperty()` | Detecta si un filtro es propiedad calculada (en OrdersFilterModel) |
 | **Método** | `getComputedPropertySql()` | Obtiene SQL de propiedad calculada para filtros (en OrdersFilterModel) |
@@ -129,8 +129,9 @@ Consultar **múltiples órdenes** aplicando filtros dinámicos, con soporte para
 | Parámetro | Tipo | Default | Descripción |
 |-----------|------|---------|-------------|
 | `limit` | Integer | 1000 | Máximo de filas a devolver |
-| `lastId` | UUID | *(ninguno)* | ID de la última orden recibida (cursor para paginación keyset) |
-| `orderBy` | String | *(ninguno)* | Cláusula ORDER BY (prepended a `ord.c_order_id`) |
+| `orderBy` | String | `ord.created DESC` | Columna + dirección de ordenamiento. Soporta computed properties (`@status DESC`) |
+| `lastId` | UUID | *(ninguno)* | Cursor parte 1: `c_order_id` de la última fila de la página anterior |
+| `lastSortValue` | String | *(ninguno)* | Cursor parte 2: valor de la columna de orden de la última fila (requerido junto con `lastId`) |
 
 ## Sintaxis de Filtros
 
@@ -201,11 +202,12 @@ GET /ws/com.doceleguas.pos.webservices.GetOrdersFilter
   &f.documentno=VBS2
   &f.ordertype=ORD
   &limit=50
+  &orderBy=ord.created DESC
 ```
 
 ## Respuesta
 
-La respuesta incluye campos de **paginación keyset** (cursor-based) para soporte de lazy loading:
+La respuesta incluye campos de **paginación keyset compuesto** (compound cursor) con soporte de ordenamiento en servidor:
 
 ```json
 {
@@ -214,16 +216,19 @@ La respuesta incluye campos de **paginación keyset** (cursor-based) para soport
   "totalRows": 350,       // Total de registros que coinciden con los filtros
   "returnedRows": 100,    // Filas devueltas en esta respuesta
   "limit": 100,           // Limit aplicado
-  "lastId": "5A3B...",    // c_order_id de la última fila (cursor para siguiente request)
+  "lastId": "5A3B...",    // Cursor parte 1: c_order_id de la última fila
+  "lastSortValue": "2026-02-05T10:30:00",  // Cursor parte 2: valor de la columna de orden
   "hasMore": true         // Indica si hay más páginas disponibles
 }
 ```
 
 #### Método de Paginación
 
-- **Keyset pagination**: Usa `WHERE ord.c_order_id > :lastId` en lugar de `OFFSET` (más eficiente en PostgreSQL)
-- **ORDER BY**: Siempre incluye `ord.c_order_id` como último criterio para cursores estables
-- **totalRows**: Se obtiene con COUNT query separado (no afectado por lastId)
+- **Keyset compuesto**: Cursor de dos valores (`lastId` + `lastSortValue`) en lugar de `OFFSET` (más eficiente en PostgreSQL)
+- **ORDER BY compuesto**: `{sortColumn} {direction}, ord.c_order_id {direction}` — tiebreaker siempre con la misma dirección
+- **Cursor compuesto WHERE**: Para DESC: `(col < :lastSortValue OR (col = :lastSortValue AND id < :lastId))`. Para ASC: `(col > :lastSortValue OR (col = :lastSortValue AND id > :lastId))`
+- **orderBy configurable**: Acepta cualquier columna + dirección, incluyendo computed properties (`@status DESC`). Default: `ord.created DESC`
+- **totalRows**: Se obtiene con COUNT query separado (no afectado por cursor)
 - **hasMore**: `true` cuando `returnedRows >= limit`
 
 ### Ejemplo de Respuesta Completa
@@ -367,8 +372,8 @@ El parámetro `selectList` acepta cualquier expresión SQL válida. La query pri
 ### Prevención de SQL Injection
 
 1. **selectList**: Se eliminan keywords peligrosos (UPDATE, DELETE, DROP, etc.)
-2. **orderBy**: Solo se permiten caracteres alfanuméricos, puntos, guiones bajos
-3. **Filtros**: Se usan parámetros preparados (`:param`)
+2. **orderBy**: Solo caracteres alfanuméricos, puntos, guiones bajos, comas y espacios permitidos
+3. **Filtros y cursores**: Se usan parámetros preparados (`:param`)
 4. **client/organization**: Aplicados en WHERE obligatoriamente
 
 ---
@@ -396,4 +401,4 @@ curl -u admin:admin \
 ---
 
 *Documentación actualizada: 2026-02-09*
-*Versión: 8.0 - Paginación keyset con lastId (reemplaza offset), optimización de query (org filter)*
+*Versión: 9.0 - Paginación keyset compuesto con orderBy + lastSortValue*

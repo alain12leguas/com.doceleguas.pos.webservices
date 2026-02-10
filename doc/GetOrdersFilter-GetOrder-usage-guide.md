@@ -38,46 +38,73 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
 | Parámetro | Tipo | Default | Descripción |
 |-----------|------|---------|-------------|
 | `limit` | Integer | 1000 | Máximo de filas a devolver |
-| `lastId` | UUID | *(ninguno)* | ID de la última orden recibida (paginación keyset) |
-| `orderBy` | String | *(ninguno)* | Cláusula ORDER BY (prepended a `ord.c_order_id`) |
+| `orderBy` | String | `ord.created DESC` | Columna + dirección de ordenamiento. Soporta computed properties (`@status DESC`) |
+| `lastId` | UUID | *(ninguno)* | Cursor: `c_order_id` de la última fila de la página anterior |
+| `lastSortValue` | String | *(ninguno)* | Cursor: valor de la columna de orden de la última fila (requerido junto con `lastId`) |
 
 ---
 
-## Paginación Keyset y Lazy Loading
+## Paginación Keyset Compuesto y Ordenamiento
 
-El WebService utiliza **paginación keyset (cursor-based)** con el parámetro `lastId`, siguiendo el mismo patrón que los modelos de MasterData (OCProduct, etc.). Este enfoque es más eficiente que `OFFSET` porque PostgreSQL no necesita escanear y descartar filas.
+El WebService utiliza **paginación keyset compuesto (compound cursor)** que combina eficiencia de rendimiento con soporte completo para **ordenamiento en el servidor**. Los resultados se devuelven ya ordenados, listos para mostrar directamente en el frontend.
+
+### ¿Por qué Keyset Compuesto?
+
+| Enfoque | Rendimiento | Ordenamiento servidor | Correctud |
+|---------|-------------|----------------------|------------|
+| `OFFSET` | Lento en offsets grandes | ✅ Sí | ✅ Pero lento |
+| Keyset simple (`id > :lastId`) | ✅ Rápido | ❌ Solo por `c_order_id` | ❌ Pierde/duplica filas con otro ORDER BY |
+| **Keyset compuesto** | ✅ Rápido | ✅ Cualquier columna | ✅ Sin pérdida ni duplicados |
 
 ### Cómo Funciona
 
-1. **Primera request**: Sin `lastId`, devuelve los primeros `limit` registros
-2. **Siguientes requests**: Se envía `lastId` con el valor del campo `lastId` de la respuesta anterior
-3. El servidor filtra con `WHERE ord.c_order_id > :lastId` y devuelve el siguiente lote
-4. El campo `hasMore` indica si hay más páginas disponibles
+El cursor rastrea **dos valores** de la última fila devuelta:
+- `lastId`: el `c_order_id` (tiebreaker único)
+- `lastSortValue`: el valor de la columna de ordenamiento
 
-### Orden de Resultados
+El ORDER BY siempre usa dos columnas con la **misma dirección**: la columna de orden + `c_order_id` como desempate:
+```sql
+ORDER BY ord.created DESC, ord.c_order_id DESC
+```
 
-- Si se proporciona `orderBy`, se usa como **primer criterio** de ordenación
-- `ord.c_order_id` se añade **siempre al final** como criterio de desempate para garantizar cursores estables
-- Si no se proporciona `orderBy`: `ORDER BY ord.c_order_id`
-- Si se proporciona `orderBy=ord.created DESC`: `ORDER BY ord.created DESC, ord.c_order_id`
+Y el WHERE usa un comparador compuesto para saltar exactamente las filas ya devueltas:
+```sql
+-- Para DESC:
+AND (ord.created < :lastSortValue
+     OR (ord.created = :lastSortValue AND ord.c_order_id < :lastId))
 
-> **Nota técnica**: Para paginación correcta al 100%, el `orderBy` debería alinearse con `ord.c_order_id` ascendente. Usar un `orderBy` personalizado junto con `lastId` puede producir resultados desordenados entre páginas, ya que el cursor solo rastrea el `c_order_id`. Para lazy loading donde se cargan TODOS los registros, esto es generalmente aceptable.
+-- Para ASC:
+AND (ord.created > :lastSortValue
+     OR (ord.created = :lastSortValue AND ord.c_order_id > :lastId))
+```
+
+### Flujo de Paginación
+
+1. **Primera request**: Sin `lastId`/`lastSortValue`, devuelve los primeros `limit` registros ordenados
+2. **Siguientes requests**: Enviar `lastId` y `lastSortValue` de la respuesta anterior
+3. El servidor construye el cursor compuesto y devuelve el siguiente lote
+4. `hasMore` indica si hay más páginas
+
+### Valores por defecto del orderBy
+
+Si no se envía `orderBy` o el valor no es válido, se usa `ord.created DESC` por defecto.
 
 ### Campos de Respuesta para Paginación
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `totalRows` | Integer | **Total de registros** que coinciden con los filtros (sin limit/lastId) |
+| `totalRows` | Integer | **Total de registros** que coinciden con los filtros (sin limit/cursor) |
 | `returnedRows` | Integer | Número de filas devueltas en esta respuesta |
 | `limit` | Integer | El limit aplicado en esta request |
-| `lastId` | UUID | `c_order_id` de la última fila devuelta (cursor para siguiente página) |
+| `lastId` | UUID | Cursor parte 1: `c_order_id` de la última fila devuelta |
+| `lastSortValue` | String | Cursor parte 2: valor de la columna de orden de la última fila |
 | `hasMore` | Boolean | `true` si hay más páginas disponibles |
 
-### Ejemplo de Flujo de Paginación Keyset
+### Ejemplo de Flujo de Paginación Keyset Compuesto
 
-**Request 1** - Primera página (sin lastId):
+**Request 1** - Primera página (ordenado por fecha DESC):
 ```
-GET /ws/GetOrdersFilter?...&limit=100
+GET /ws/GetOrdersFilter?...&limit=100&orderBy=ord.created+DESC
 ```
 ```json
 {
@@ -87,13 +114,14 @@ GET /ws/GetOrdersFilter?...&limit=100
   "returnedRows": 100,
   "limit": 100,
   "lastId": "5A3B72C8D1E4F09A6B2C83D94E5F0A1B",
+  "lastSortValue": "2026-02-05T10:30:00",
   "hasMore": true
 }
 ```
 
-**Request 2** - Segunda página (lastId de la respuesta anterior):
+**Request 2** - Segunda página (cursor compuesto de la respuesta anterior):
 ```
-GET /ws/GetOrdersFilter?...&limit=100&lastId=5A3B72C8D1E4F09A6B2C83D94E5F0A1B
+GET /ws/GetOrdersFilter?...&limit=100&orderBy=ord.created+DESC&lastId=5A3B72C8D1E4F09A6B2C83D94E5F0A1B&lastSortValue=2026-02-05T10:30:00
 ```
 ```json
 {
@@ -103,13 +131,14 @@ GET /ws/GetOrdersFilter?...&limit=100&lastId=5A3B72C8D1E4F09A6B2C83D94E5F0A1B
   "returnedRows": 100,
   "limit": 100,
   "lastId": "B8D4E612F3A5069C7D3E94A05F6B1C2D",
+  "lastSortValue": "2026-01-28T09:15:00",
   "hasMore": true
 }
 ```
 
 **Request 4** - Última página:
 ```
-GET /ws/GetOrdersFilter?...&limit=100&lastId=E1F5A823B4C6D09D8E4F05B16C7D2E3F
+GET /ws/GetOrdersFilter?...&limit=100&orderBy=ord.created+DESC&lastId=E1F5A823B4C6D09D8E4F05B16C7D2E3F&lastSortValue=2026-01-10T08:00:00
 ```
 ```json
 {
@@ -119,6 +148,7 @@ GET /ws/GetOrdersFilter?...&limit=100&lastId=E1F5A823B4C6D09D8E4F05B16C7D2E3F
   "returnedRows": 50,
   "limit": 100,
   "lastId": "F2A6B934C5D7E10E9F5A16C27D8E3F4A",
+  "lastSortValue": "2025-12-20T14:00:00",
   "hasMore": false
 }
 ```
@@ -126,32 +156,48 @@ GET /ws/GetOrdersFilter?...&limit=100&lastId=E1F5A823B4C6D09D8E4F05B16C7D2E3F
 ### Implementación en el Cliente (Pseudocódigo)
 
 ```javascript
-async function loadAllOrders(filters) {
-  const limit = 100;
-  let lastId = null;
-  let allOrders = [];
-  let hasMore = true;
-  
-  while (hasMore) {
-    let url = `/ws/GetOrdersFilter?...&limit=${limit}`;
-    if (lastId) {
-      url += `&lastId=${lastId}`;
-    }
-    
-    const response = await fetch(url);
-    const json = await response.json();
-    
-    allOrders = allOrders.concat(json.data);
-    hasMore = json.hasMore;
-    lastId = json.lastId;  // Cursor para la siguiente página
-    
-    // Opcional: actualizar progreso en UI
-    updateProgress(allOrders.length, json.totalRows);
+// Cargar una página de órdenes para mostrar (paginación servidor)
+async function loadOrdersPage(filters, orderBy, cursor) {
+  let url = `/ws/GetOrdersFilter?...&limit=50&orderBy=${encodeURIComponent(orderBy)}`;
+  if (cursor) {
+    url += `&lastId=${cursor.lastId}&lastSortValue=${encodeURIComponent(cursor.lastSortValue)}`;
   }
   
-  return allOrders;
+  const json = await fetch(url).then(r => r.json());
+  
+  // Los datos ya vienen ordenados desde el servidor, se muestran directamente
+  displayOrders(json.data);
+  showPagination(json.totalRows, json.hasMore);
+  
+  // Guardar cursores para el botón "Siguiente página"
+  return {
+    lastId: json.lastId,
+    lastSortValue: json.lastSortValue,
+    hasMore: json.hasMore
+  };
 }
+
+// Uso: primera página
+let cursor = await loadOrdersPage(myFilters, 'ord.created DESC', null);
+// Botón "Siguiente"
+cursor = await loadOrdersPage(myFilters, 'ord.created DESC', cursor);
 ```
+
+### Columnas Válidas para orderBy
+
+El parámetro `orderBy` acepta cualquier columna de las tablas joineadas, más computed properties:
+
+| Ejemplo de orderBy | Descripción |
+|-------------------|-------------|
+| `ord.created DESC` | Por fecha de creación (default) |
+| `ord.dateordered ASC` | Por fecha de orden ascendente |
+| `ord.grandtotal DESC` | Por monto total descendente |
+| `ord.documentno ASC` | Por número de documento |
+| `bp.name ASC` | Por nombre del cliente |
+| `@status ASC` | Por estado calculado (computed property) |
+| `@paidAmount DESC` | Por monto pagado |
+
+> **Nota**: Si la columna no es válida o está vacía, se usa `ord.created DESC` por defecto. La dirección `ASC`/`DESC` es opcional; si no se especifica, se usa `DESC`.
 
 ---
 
@@ -421,7 +467,7 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
   &orderBy=ord.created DESC
 ```
 
-### Response (con propiedades calculadas y paginación keyset)
+### Response (con propiedades calculadas y paginación keyset compuesto)
 ```json
 {
   "success": true,
@@ -441,6 +487,7 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
   "returnedRows": 1,
   "limit": 50,
   "lastId": "F5B00821E0F32EAFF8BD0792B1B68BE0",
+  "lastSortValue": "2026-02-02T17:12:30.096Z",
   "hasMore": false
 }
 ```
@@ -669,8 +716,8 @@ Ambos WebServices utilizan los siguientes JOINs que permiten acceder a columnas 
 ## Notas de Seguridad
 
 1. **SQL Injection Prevention**: Los keywords peligrosos (UPDATE, DELETE, DROP, etc.) son eliminados del `selectList`
-2. **orderBy sanitizado**: Solo caracteres alfanuméricos, puntos, guiones bajos permitidos
-3. **Parámetros preparados**: Todos los filtros usan parámetros (`:param`) para prevenir inyección
+2. **orderBy sanitizado**: Solo caracteres alfanuméricos, puntos, guiones bajos, comas y espacios permitidos
+3. **Parámetros preparados**: Todos los filtros y cursores usan parámetros (`:param`) para prevenir inyección
 4. **Client/Organization**: Siempre se aplican en el WHERE para seguridad multi-tenant
 
 ---
@@ -700,8 +747,8 @@ Esta clase centraliza código compartido entre `OrdersFilterModel` y `OrderModel
 | `ORDER_TYPE_SQL` | Constante | CASE para tipo de orden |
 | `ORDER_BASE_JOINS` | Constante | JOINs comunes (bp, org, doctype, etc.) |
 | `sanitizeSelectList()` | Método | Prevención SQL injection en SELECT |
-| `sanitizeOrderBy()` | Método | Prevención SQL injection en ORDER BY (usado por OrderModel) |
-| `replaceComputedProperties()` | Método | Reemplazo de @alias → SQL |
+| `sanitizeOrderBy()` | Método | Prevención SQL injection en ORDER BY |
+| `replaceComputedProperties()` | Método | Reemplazo de @alias → SQL (SELECT y ORDER BY) |
 | `rowToJson()` | Método | Conversión Map → JSONObject |
 
 ---
@@ -906,4 +953,4 @@ curl -u admin:admin \
 ---
 
 *Documentación actualizada: 2026-02-09*
-*Versión: 5.0 - Paginación keyset con lastId (reemplaza offset), optimización de query*
+*Versión: 6.0 - Paginación keyset compuesto con orderBy + lastSortValue*

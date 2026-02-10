@@ -18,6 +18,7 @@ import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.PAID_AMOUNT
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.STATUS_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.replaceComputedProperties;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.rowToJson;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeOrderBy;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.sanitizeSelectList;
 
 import java.util.ArrayList;
@@ -54,17 +55,37 @@ public class OrdersFilterModel extends Model {
     return "Order";
   }
 
+  /** Default ORDER BY column when none specified or invalid */
+  private static final String DEFAULT_SORT_COLUMN = "ord.created";
+  private static final String DEFAULT_SORT_DIRECTION = "DESC";
+
   /**
    * Creates a native SQL query for orders based on the provided parameters.
    * 
-   * <p>Uses keyset (cursor-based) pagination with {@code lastId} parameter, following
-   * the same pattern as {@link com.doceleguas.pos.webservices.OCProduct OCProduct}
-   * and other MasterData models. This is more efficient than OFFSET-based pagination
-   * because PostgreSQL doesn't need to scan and discard rows.</p>
+   * <p>Uses <strong>compound keyset (cursor-based) pagination</strong> for efficient
+   * server-side pagination with arbitrary ORDER BY columns. This is more efficient
+   * than OFFSET-based pagination because PostgreSQL doesn't need to scan and discard rows.</p>
    * 
-   * <p>The query always includes {@code ord.c_order_id} as {@code __lastid} in the
-   * SELECT for cursor tracking, and always appends {@code ord.c_order_id} as the
-   * last ORDER BY column to ensure stable pagination.</p>
+   * <h3>Compound Keyset Pagination</h3>
+   * <p>The query always orders by two columns: the sort column (from {@code orderBy} parameter
+   * or {@code ord.created DESC} by default) followed by {@code ord.c_order_id} in the same
+   * direction as a tiebreaker. The cursor tracks two values ({@code __lastid} and
+   * {@code __lastsortvalue}) and uses a compound WHERE condition to correctly skip
+   * already-returned rows without losing or duplicating any records.</p>
+   * 
+   * <p>For DESC ordering:</p>
+   * <pre>
+   * WHERE (sortCol &lt; :lastSortValue
+   *    OR (sortCol = :lastSortValue AND c_order_id &lt; :lastId))
+   * ORDER BY sortCol DESC, c_order_id DESC
+   * </pre>
+   * 
+   * <p>For ASC ordering:</p>
+   * <pre>
+   * WHERE (sortCol &gt; :lastSortValue
+   *    OR (sortCol = :lastSortValue AND c_order_id &gt; :lastId))
+   * ORDER BY sortCol ASC, c_order_id ASC
+   * </pre>
    * 
    * @param jsonParams JSON object containing:
    *   <ul>
@@ -73,7 +94,8 @@ public class OrdersFilterModel extends Model {
    *     <li>orderType: Order type filter (ORD, RET, LAY, etc.)</li>
    *     <li>limit: Maximum rows to return</li>
    *     <li>lastId: c_order_id of the last row from previous page (optional)</li>
-   *     <li>orderBy: ORDER BY clause (optional)</li>
+   *     <li>lastSortValue: value of the sort column from the last row (optional, required with lastId)</li>
+   *     <li>orderBy: Sort column + direction, e.g. "ord.created DESC" (optional, defaults to ord.created DESC)</li>
    *     <li>client: Client ID for security filter</li>
    *     <li>organization: Organization ID for security filter</li>
    *   </ul>
@@ -89,35 +111,59 @@ public class OrdersFilterModel extends Model {
     // Replace computed property aliases with their SQL expressions
     selectList = replaceComputedProperties(selectList);
     Long limit = jsonParams.optLong("limit", 1000);
-    String orderBy = jsonParams.optString("orderBy", "");
     String lastId = jsonParams.optString("lastId", null);
+    String lastSortValue = jsonParams.optString("lastSortValue", null);
+    
+    // Parse and resolve the ORDER BY column and direction
+    String orderByParam = jsonParams.optString("orderBy", "").trim();
+    String sortColumn = DEFAULT_SORT_COLUMN;
+    String sortDirection = DEFAULT_SORT_DIRECTION;
+    
+    if (!orderByParam.isEmpty()) {
+      String sanitized = sanitizeOrderBy(orderByParam);
+      // Extract column and direction from sanitized orderBy (e.g. "ord.created DESC")
+      String[] parts = sanitized.trim().split("\\s+");
+      if (parts.length >= 1 && !parts[0].isEmpty()) {
+        sortColumn = parts[0];
+        if (parts.length >= 2 && parts[1].toUpperCase().matches("ASC|DESC")) {
+          sortDirection = parts[1].toUpperCase();
+        }
+      }
+    }
+    
+    // Resolve computed property aliases in the sort column (e.g. @status -> SQL expression)
+    String sortColumnSql = replaceComputedProperties(sortColumn);
+    
+    boolean isDesc = "DESC".equals(sortDirection);
+    boolean hasCursor = lastId != null && !lastId.isEmpty() 
+        && lastSortValue != null && !lastSortValue.isEmpty();
     
     // Build WHERE clause and collect filter parameters
     QueryComponents components = buildQueryComponents(jsonParams);
     
     // Build the SQL query
-    // Always include c_order_id as __lastid for cursor-based pagination tracking
+    // Always include __lastid and __lastsortvalue for compound cursor tracking
     StringBuilder sql = new StringBuilder();
-    sql.append("SELECT ord.c_order_id AS __lastid, ").append(selectList);
+    sql.append("SELECT ord.c_order_id AS __lastid, ");
+    sql.append(sortColumnSql).append(" AS __lastsortvalue, ");
+    sql.append(selectList);
     sql.append(" FROM c_order ord");
     sql.append(ORDER_BASE_JOINS);
     sql.append(components.whereClause);
     
-    // Keyset pagination: skip rows already retrieved in previous pages
-    if (lastId != null && !lastId.isEmpty()) {
-      sql.append(" AND ord.c_order_id > :lastId");
+    // Compound keyset pagination: skip rows already returned in previous pages
+    if (hasCursor) {
+      // For DESC: (col < :lastSortValue OR (col = :lastSortValue AND id < :lastId))
+      // For ASC:  (col > :lastSortValue OR (col = :lastSortValue AND id > :lastId))
+      String cmp = isDesc ? "<" : ">";
+      sql.append(" AND (").append(sortColumnSql).append(" ").append(cmp).append(" :lastSortValue");
+      sql.append(" OR (").append(sortColumnSql).append(" = :lastSortValue");
+      sql.append(" AND ord.c_order_id ").append(cmp).append(" :lastId))");
     }
     
-    // ORDER BY: user orderBy first (if provided), always c_order_id last for stable pagination
-    sql.append(" ORDER BY ");
-    if (orderBy != null && !orderBy.isEmpty()) {
-      // Sanitize: only allow safe characters for SQL ORDER BY
-      String sanitized = orderBy.replaceAll("[^a-zA-Z0-9_.,\\s]", "").trim();
-      if (!sanitized.isEmpty()) {
-        sql.append(sanitized).append(", ");
-      }
-    }
-    sql.append("ord.c_order_id");
+    // ORDER BY: sort column + c_order_id as tiebreaker, both in the same direction
+    sql.append(" ORDER BY ").append(sortColumnSql).append(" ").append(sortDirection);
+    sql.append(", ord.c_order_id ").append(sortDirection);
     
     sql.append(" LIMIT :limit");
     
@@ -132,8 +178,9 @@ public class OrdersFilterModel extends Model {
     query.setParameter("organizationId", components.organizationId);
     query.setParameter("limit", limit);
     
-    if (lastId != null && !lastId.isEmpty()) {
+    if (hasCursor) {
       query.setParameter("lastId", lastId);
+      query.setParameter("lastSortValue", lastSortValue);
     }
     
     // Set filter parameters

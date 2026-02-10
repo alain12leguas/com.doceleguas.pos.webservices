@@ -77,16 +77,22 @@ public class GetOrdersFilter implements WebService {
       JSONArray dataArray = new JSONArray();
       int rowCount = 0;
       String lastReturnedId = null;
+      String lastReturnedSortValue = null;
       
       try {
         while (scroll.next()) {
           @SuppressWarnings("unchecked")
           Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
           
-          // Extract cursor ID for keyset pagination (always included by OrdersFilterModel)
+          // Extract compound cursor values for keyset pagination
+          // (always included by OrdersFilterModel)
           Object cursorId = rowMap.remove("__lastid");
+          Object cursorSortValue = rowMap.remove("__lastsortvalue");
           if (cursorId != null) {
             lastReturnedId = cursorId.toString();
+          }
+          if (cursorSortValue != null) {
+            lastReturnedSortValue = cursorSortValue.toString();
           }
           
           JSONObject rowJson = ordersFilterModel.rowToJson(rowMap);
@@ -103,7 +109,7 @@ public class GetOrdersFilter implements WebService {
         scroll.close();
       }
       
-      // Build response with keyset pagination info
+      // Build response with compound keyset pagination info
       long limit = jsonParams.optLong("limit", 1000);
       
       JSONObject responseJson = new JSONObject();
@@ -115,7 +121,10 @@ public class GetOrdersFilter implements WebService {
       responseJson.put("returnedRows", rowCount);          // Rows returned in this response
       responseJson.put("limit", limit);                    // Limit applied
       if (lastReturnedId != null) {
-        responseJson.put("lastId", lastReturnedId);        // Cursor: pass as lastId in next request
+        responseJson.put("lastId", lastReturnedId);                    // Cursor part 1: pass as lastId in next request
+      }
+      if (lastReturnedSortValue != null) {
+        responseJson.put("lastSortValue", lastReturnedSortValue);      // Cursor part 2: pass as lastSortValue in next request
       }
       responseJson.put("hasMore", rowCount > 0 && rowCount >= limit);  // More pages available
       
@@ -160,17 +169,21 @@ public class GetOrdersFilter implements WebService {
     jsonParams.put("organization", organization);
     jsonParams.put("selectList", selectList);
     
-    // Optional pagination parameters (keyset pagination with lastId)
+    // Optional pagination parameters (compound keyset pagination)
     jsonParams.put("limit", parseLongParam(request, "limit", 1000L));
     String lastId = request.getParameter("lastId");
     if (lastId != null && !lastId.trim().isEmpty()) {
       jsonParams.put("lastId", lastId.trim());
     }
+    String lastSortValue = request.getParameter("lastSortValue");
+    if (lastSortValue != null && !lastSortValue.trim().isEmpty()) {
+      jsonParams.put("lastSortValue", lastSortValue.trim());
+    }
     
-    // Optional order by
+    // Optional order by (default: ord.created DESC)
     String orderBy = request.getParameter("orderBy");
-    if (orderBy != null && !orderBy.isEmpty()) {
-      jsonParams.put("orderBy", orderBy);
+    if (orderBy != null && !orderBy.trim().isEmpty()) {
+      jsonParams.put("orderBy", orderBy.trim());
     }
     
     // Parse filters (f.{column}={value})
