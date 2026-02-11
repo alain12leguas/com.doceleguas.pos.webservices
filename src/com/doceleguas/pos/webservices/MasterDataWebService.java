@@ -22,6 +22,8 @@ import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
+import org.openbravo.model.ad.access.Role;
+import org.openbravo.model.ad.access.User;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
@@ -45,8 +47,11 @@ public class MasterDataWebService implements WebService {
       jsonsent.put("termnalName", request.getParameter("terminalName"));
       requestParamsToJson(jsonsent, request);
 
+      //User currentUser = OBDal.getInstance().get(User.class, jsonsent.getString("user"));
+      //Role defaultPosRole = currentUser.getOBPOSDefaultPOSRole();
+      
       OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
-          OBContext.getOBContext().getRole().getId(),
+    		  OBContext.getOBContext().getUser().getOBPOSDefaultPOSRole().getId(),
           jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
           jsonsent.optString("organization",
               OBContext.getOBContext().getCurrentOrganization().getId()));

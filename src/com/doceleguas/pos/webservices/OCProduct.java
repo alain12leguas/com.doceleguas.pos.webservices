@@ -51,10 +51,12 @@ public class OCProduct extends Model {
     }
     sql += " ORDER  BY e.m_product_id " //
         + " LIMIT :limit";
+    //final Date terminalDate = getTerminalDate(jsonParams);
+    final Date terminalDate = new Date();
     String organization = jsonParams.getString("organization");
     final String posId = getTerminalId(jsonParams);
-    final String productListId = POSUtils.getProductListId(posId, jsonParams);
-    final String priceListVersionId = POSUtils.getPriceListVersionByOrgId(organization, new Date())
+    final String productListId = POSUtils.getProductListByPosterminalId(posId).getId();
+    final String priceListVersionId = POSUtils.getPriceListVersionByOrgId(organization, terminalDate)
         .getId();
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
@@ -86,11 +88,6 @@ public class OCProduct extends Model {
     return OBMOBCUtils.calculateServerDate(
         jsonsent.getJSONObject("parameters").getString("terminalTime"),
         jsonsent.getJSONObject("parameters").getJSONObject("terminalTimeOffset").getLong("value"));
-  }
-
-  private Long getLastUpdated(final JSONObject jsonsent) throws JSONException {
-    return jsonsent.has("lastUpdated") && !jsonsent.get("lastUpdated").equals("undefined")
-        && !jsonsent.get("lastUpdated").equals("null") ? jsonsent.getLong("lastUpdated") : null;
   }
 
 }
