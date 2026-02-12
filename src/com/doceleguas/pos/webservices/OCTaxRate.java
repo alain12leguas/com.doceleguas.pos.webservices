@@ -20,47 +20,61 @@ public class OCTaxRate extends Model {
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
     Long offset = jsonParams.optLong("offset", 0);
-    String sql = "SELECT " + selectList + ", " //
-        + "e.isactive as \"isActive\" " //
-        + " FROM C_Tax e" // "
-        + " INNER JOIN C_TaxCategory financialm1_ ON e.C_TaxCategory_ID=financialm1_.C_TaxCategory_ID" // "
-        + " WHERE (e.AD_Client_ID IN :clients)" // "
-        + "  AND (e.AD_Org_ID IN :orgs)" //
-        + "  AND (e.SOPOType IN ('S', 'B'))" //
-        + "  AND (e.IsSummary='N'" //
-        + "       OR financialm1_.Asbom='Y')" //
-        + "  AND (e.C_Country_ID=:countryId" //
-        + "       OR (e.C_Country_ID IS NULL)" //
-        + "       AND NOT (EXISTS" // "
-        + "                  (SELECT 1" // "
-        + "                   FROM C_Tax_Zone financialm3_" // "
-        + "                   WHERE financialm3_.C_Tax_ID=e.C_Tax_ID))" // "
-        + "       OR EXISTS" //
-        + "         (SELECT 1" //
-        + "          FROM C_Tax_Zone financialm4_" //
-        + "          WHERE financialm4_.C_Tax_ID=e.C_Tax_ID" //
-        + "            AND financialm4_.From_Country_ID=:countryId)" //
-        + "       OR EXISTS" //
-        + "         (SELECT 1" //
-        + "          FROM C_Tax_Zone financialm5_" //
-        + "          WHERE financialm5_.C_Tax_ID=e.C_Tax_ID" //
-        + "            AND (financialm5_.From_Country_ID IS NULL)))" //
-        + "  AND (e.C_Region_ID=:regionId" //
-        + "       OR (e.C_Region_ID IS NULL)" //
-        + "       AND NOT (EXISTS" //
-        + "                  (SELECT 1" //
-        + "                   FROM C_Tax_Zone financialm6_" // "
-        + "                   WHERE financialm6_.C_Tax_ID=e.C_Tax_ID))" // "
-        + "       OR EXISTS" //
-        + "         (SELECT 1" //
-        + "          FROM C_Tax_Zone financialm7_" //
-        + "          WHERE financialm7_.C_Tax_ID=e.C_Tax_ID" //
-        + "            AND financialm7_.From_Region_ID=:regionId)" //
-        + "       OR EXISTS" //
-        + "         (SELECT 1" //
-        + "          FROM C_Tax_Zone financialm8_" //
-        + "          WHERE financialm8_.C_Tax_ID=e.C_Tax_ID" //
-        + "            AND (financialm8_.From_Region_ID IS NULL)))";//
+    OBPOSApplications posDetail = POSUtils.getTerminalById(jsonParams.getString("pos"));
+    final OrganizationInformation storeInfo = posDetail.getOrganization()
+        .getOrganizationInformationList()
+        .get(0);
+
+    final Country fromCountry = storeInfo.getLocationAddress().getCountry();
+    final Region fromRegion = storeInfo.getLocationAddress().getRegion();
+
+    String sql = "SELECT " + selectList + ", "
+            + "e.isactive as \"isActive\" "
+            + " FROM C_Tax e"
+            + " INNER JOIN C_TaxCategory financialm1_ ON e.C_TaxCategory_ID=financialm1_.C_TaxCategory_ID"
+            + " WHERE (e.AD_Client_ID IN :clients)"
+            + "  AND (e.AD_Org_ID IN :orgs)"
+            + "  AND (e.SOPOType IN ('S', 'B'))"
+            + "  AND (e.IsSummary='N'"
+            + "       OR financialm1_.Asbom='Y')";
+
+    if (fromCountry != null) {
+        sql += "  AND (e.C_Country_ID=:countryId"
+            + "       OR (e.C_Country_ID IS NULL)"
+            + "       AND NOT (EXISTS"
+            + "                  (SELECT 1"
+            + "                   FROM C_Tax_Zone financialm3_"
+            + "                   WHERE financialm3_.C_Tax_ID=e.C_Tax_ID))"
+            + "       OR EXISTS"
+            + "         (SELECT 1"
+            + "          FROM C_Tax_Zone financialm4_"
+            + "          WHERE financialm4_.C_Tax_ID=e.C_Tax_ID"
+            + "            AND financialm4_.From_Country_ID=:countryId)"
+            + "       OR EXISTS"
+            + "         (SELECT 1"
+            + "          FROM C_Tax_Zone financialm5_"
+            + "          WHERE financialm5_.C_Tax_ID=e.C_Tax_ID"
+            + "            AND (financialm5_.From_Country_ID IS NULL)))";
+    }
+
+    if (fromRegion != null) {
+        sql += "  AND (e.C_Region_ID=:regionId"
+            + "       OR (e.C_Region_ID IS NULL)"
+            + "       AND NOT (EXISTS"
+            + "                  (SELECT 1"
+            + "                   FROM C_Tax_Zone financialm6_"
+            + "                   WHERE financialm6_.C_Tax_ID=e.C_Tax_ID))"
+            + "       OR EXISTS"
+            + "         (SELECT 1"
+            + "          FROM C_Tax_Zone financialm7_"
+            + "          WHERE financialm7_.C_Tax_ID=e.C_Tax_ID"
+            + "            AND financialm7_.From_Region_ID=:regionId)"
+            + "       OR EXISTS"
+            + "         (SELECT 1"
+            + "          FROM C_Tax_Zone financialm8_"
+            + "          WHERE financialm8_.C_Tax_ID=e.C_Tax_ID"
+            + "            AND (financialm8_.From_Region_ID IS NULL)))";
+    }
     if (jsonParams.optString("lastUpdated", null) != null) {
       sql += " AND e.updated > :lastUpdated";
     } else {
@@ -70,12 +84,6 @@ public class OCTaxRate extends Model {
     if (offset != 0) {
       sql += " OFFSET :offset";
     }
-    OBPOSApplications posDetail = POSUtils.getTerminalById(jsonParams.getString("pos"));
-    final OrganizationInformation storeInfo = posDetail.getOrganization()
-        .getOrganizationInformationList()
-        .get(0);
-    final Country fromCountry = storeInfo.getLocationAddress().getCountry();
-    final Region fromRegion = storeInfo.getLocationAddress().getRegion();
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
     query.setParameterList("clients", OBContext.getOBContext().getReadableClients())
@@ -85,9 +93,20 @@ public class OCTaxRate extends Model {
                 .getNaturalTree(jsonParams.getString("organization")))
         .setParameter("countryId", fromCountry.getId())
         .setParameter("limit", limit)
-        .setParameter("regionId", fromRegion.getId());
+        .setParameter("regionId", fromRegion.getId());    
     if (offset != 0) {
       query.setParameter("offset", offset);
+    }
+    try {
+    	
+    System.out.println("Organization: " + jsonParams.getString("organization"));
+    System.out.println("Country: " + fromCountry!=null?fromCountry.getId():"null");
+    System.out.println("Region: " + fromRegion!=null?fromRegion.getId():"null");
+    System.out.println("Clients: " + OBContext.getOBContext().getReadableClients().toString());
+    System.out.println("Organization: " + jsonParams.getString("organization"));
+    System.out.println("Natural Tree: " + OBContext.getOBContext().getOrganizationStructureProvider().getNaturalTree(jsonParams.getString("organization")));
+    }catch(Exception e) {
+    	System.out.println(e.getMessage());
     }
     return query;
   }
