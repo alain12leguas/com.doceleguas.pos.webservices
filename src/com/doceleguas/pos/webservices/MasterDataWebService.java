@@ -20,6 +20,7 @@ import org.hibernate.query.NativeQuery;
 import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
+import org.openbravo.dal.service.OBQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery.MasterDataModel;
 import org.openbravo.model.ad.access.Role;
@@ -46,12 +47,13 @@ public class MasterDataWebService implements WebService {
       jsonsent.put("pos", request.getParameter("pos"));
       jsonsent.put("termnalName", request.getParameter("terminalName"));
       requestParamsToJson(jsonsent, request);
-
+      User currentUser = getCurrentUser(jsonsent.getString("user"));
+      Role defaultPosRole = currentUser.getOBPOSDefaultPOSRole();
       //User currentUser = OBDal.getInstance().get(User.class, jsonsent.getString("user"));
-      //Role defaultPosRole = currentUser.getOBPOSDefaultPOSRole();
       
-      OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
-    		  OBContext.getOBContext().getUser().getOBPOSDefaultPOSRole().getId(),
+      
+      OBContext.setOBContext(currentUser.getId(),
+    		  defaultPosRole.getId(),
           jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
           jsonsent.optString("organization",
               OBContext.getOBContext().getCurrentOrganization().getId()));
@@ -124,6 +126,15 @@ public class MasterDataWebService implements WebService {
         out.flush();
     }
   }
+
+  private User getCurrentUser(String user) {
+	    String userHqlWhereClause = " usr where usr.username = :username";
+	    OBQuery<User> queryUser = OBDal.getInstance().createQuery(User.class, userHqlWhereClause);
+	    queryUser.setNamedParameter("username", user);
+	    queryUser.setFilterOnReadableOrganization(false);
+	    queryUser.setMaxResult(1);
+	    return queryUser.uniqueResult();
+}
 
   @Override
   public void doPost(String path, HttpServletRequest request, HttpServletResponse response)

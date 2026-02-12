@@ -42,9 +42,9 @@ public class OCBusinessPartner extends Model {
         + " WHERE  e.c_bp_group_id = businesspa5_.c_bp_group_id" //
         + " AND e.iscustomer = 'Y'" //
         + " AND ( e.ad_client_id IN :clients )"//
-        + " AND ( e.ad_org_id IN :orgs )"//
-        + " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
-        + "     FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
+        + " AND ( e.ad_org_id IN :orgs )";//
+        //+ " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
+        //+ "     FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
     if (lastUpdated != null) {
       sql += " AND e.updated > :lastUpdated";
     } else {
