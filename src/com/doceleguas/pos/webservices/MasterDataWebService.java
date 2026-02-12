@@ -103,15 +103,25 @@ public class MasterDataWebService implements WebService {
         modelInstance.exec(response.getWriter(), jsonsent);
         response.getWriter().write("}");
       }
-    } catch (Throwable t) {
-      Throwable cause = DbUtility.getUnderlyingSQLException(t);
-      log.error("Error Loading Masterdata ", cause);
-      JSONObject errorResponse = new JSONObject();
-      errorResponse.put("exception", cause.getMessage());
-      PrintWriter out = response.getWriter();
-      out.print(errorResponse.toString());
-      // out.print("{\"exception\": \"error\"}");
-      out.flush();
+    } catch (Exception e) { 
+        Throwable cause = DbUtility.getUnderlyingSQLException(e);
+        log.error("Error Loading Masterdata", e); 
+
+        JSONObject errorResponse = new JSONObject();
+        try {
+            String message = (cause != null && cause.getMessage() != null) 
+                             ? cause.getMessage() 
+                             : "Internal Server Error";
+            
+            errorResponse.put("exception", message);
+                        
+        } catch (JSONException je) {
+            log.error("Error creating JSON error response", je);
+        }
+
+        PrintWriter out = response.getWriter();
+        out.print(errorResponse.toString());
+        out.flush();
     }
   }
 

@@ -25,9 +25,8 @@ public class OCTaxRate extends Model {
         .getOrganizationInformationList()
         .get(0);
 
-    final Country fromCountry = storeInfo.getLocationAddress().getCountry();
+    Country fromCountry = storeInfo.getLocationAddress().getCountry();
     final Region fromRegion = storeInfo.getLocationAddress().getRegion();
-
     String sql = "SELECT " + selectList + ", "
             + "e.isactive as \"isActive\" "
             + " FROM C_Tax e"
@@ -90,24 +89,17 @@ public class OCTaxRate extends Model {
         .setParameterList("orgs",
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
-                .getNaturalTree(jsonParams.getString("organization")))
-        .setParameter("countryId", fromCountry.getId())
-        .setParameter("limit", limit)
-        .setParameter("regionId", fromRegion.getId());    
+                .getNaturalTree(jsonParams.getString("organization")))        
+        .setParameter("limit", limit);
+    if (fromCountry !=null) {
+    	query.setParameter("countryId", fromCountry.getId());            
+    }
+	if (fromRegion!=null) {
+	    query.setParameter("regionId", fromRegion.getId());    
+	}
     if (offset != 0) {
       query.setParameter("offset", offset);
-    }
-    try {
-    	
-    System.out.println("Organization: " + jsonParams.getString("organization"));
-    System.out.println("Country: " + fromCountry!=null?fromCountry.getId():"null");
-    System.out.println("Region: " + fromRegion!=null?fromRegion.getId():"null");
-    System.out.println("Clients: " + OBContext.getOBContext().getReadableClients().toString());
-    System.out.println("Organization: " + jsonParams.getString("organization"));
-    System.out.println("Natural Tree: " + OBContext.getOBContext().getOrganizationStructureProvider().getNaturalTree(jsonParams.getString("organization")));
-    }catch(Exception e) {
-    	System.out.println(e.getMessage());
-    }
+    }    
     return query;
   }
 

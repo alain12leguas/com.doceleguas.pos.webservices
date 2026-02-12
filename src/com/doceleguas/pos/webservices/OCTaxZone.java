@@ -27,7 +27,8 @@ public class OCTaxZone extends Model {
 
     final Country fromCountry = storeInfo.getLocationAddress().getCountry();
     final Region fromRegion = storeInfo.getLocationAddress().getRegion();
-
+    
+    
     String sql = "SELECT " + selectList + ", "
             + "e.isactive as \"isActive\" "
             + " FROM C_Tax_Zone e"
