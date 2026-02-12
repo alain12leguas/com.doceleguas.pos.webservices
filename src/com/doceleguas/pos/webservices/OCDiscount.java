@@ -34,11 +34,11 @@ public class OCDiscount extends Model {
     String lastUpdated = jsonParams.optString("lastUpdated", null);
     //@formatter:off    
     String sql = "SELECT " + selectList + ", " //
-            + "e.isactive as \"isActive\", " //
-            + filterBpCategory() + ","
-            + filterBusinessPartner() + ","
-            + filterProductCategory() + ","
-            + filterProducts()
+            + " e.isactive as \"isActive\"," //
+            + " CAST(bp_cat.js AS text) \"" + FILTER_BPCATEGORY_ALIAS + "\","
+            + " CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\","
+	        + " CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\","
+            + " CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS +"\""
             + " FROM M_Offer e" //
             + " LEFT JOIN LATERAL (" 
 			+ "   SELECT json_agg(json_build_object('id', m_obg.m_offer_bp_group_id, 'c_bp_group_id', cbg.c_bp_group_id, '_identifier', e.name || ' - ' || cbg.name)) AS js"
@@ -65,7 +65,6 @@ public class OCDiscount extends Model {
 			+ "   WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y'"
 			+ " ) prod ON TRUE"			
 			+ " WHERE e.ad_client_id = :clientId"
-			+ "  AND e.isactive = 'Y'"
 			+ "  AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id = :currencyId)"
 			+ "  AND e.ad_org_id IN :orgs"
 			+ " AND ("
@@ -105,67 +104,7 @@ public class OCDiscount extends Model {
       }
     return query;
   }
-
-  private String filterProducts() {
-    //@formatter:off
-    return " (SELECT CAST(json_agg(" //
-        + "     json_build_object(" //
-        + "         'id', m_offer_product_.m_offer_product_id,"//
-        + "         'm_product_id', m_product_.m_product_id," //
-        + "         'm_product_value', m_product_.value," //
-        + "         'm_offer_disc_qty', m_offer_product_.em_obdisc_qty," //
-        + "         'm_offer_id', e.m_offer_id,"//
-        + "         '_identifier', e.name || ' - ' || m_product_.name)) FILTER (WHERE m_offer_product_.isactive='Y') AS TEXT)"
-        + "     FROM M_Offer_Product m_offer_product_ " //
-        + "       INNER JOIN m_product m_product_ ON m_product_.m_product_id=m_offer_product_.m_product_id"
-        + "     WHERE m_offer_product_.m_offer_id=e.m_offer_id) AS \"" + FILTER_PRODUCT_ALIAS + "\"";
-    //@formatter:on
-  }
-
-  private String filterProductCategory() {
-  //@formatter:off
-   return " (SELECT CAST(json_agg("
-       + "    json_build_object(" //
-       + "         'id', m_offer_prod_cat_.m_offer_prod_cat_id,"//
-       + "         'm_product_category_id', m_product_category_.m_product_category_id," //
-       + "         'm_offer_id',  e.m_offer_id,"//
-       + "         '_identifier', e.name || ' - ' || m_product_category_.name)) FILTER (WHERE m_offer_prod_cat_.isactive='Y') AS TEXT)" //
-       + "     FROM M_Offer_Prod_Cat m_offer_prod_cat_ "
-       + "       INNER JOIN M_Product_Category m_product_category_ ON m_product_category_.m_product_category_id=m_offer_prod_cat_.m_product_category_id"
-       + "     WHERE m_offer_prod_cat_.m_offer_id=e.m_offer_id) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\"";
-       
-  //@formatter:on
-
-  }
-
-  private String filterBpCategory() {
-  //@formatter:off
-    return " (SELECT CAST(JSON_AGG("
-        + "      json_build_object("
-        + "             'id', m_offer_bp_group_.m_offer_bp_group_id,"
-        + "             'c_bp_group_id', c_bp_group_.c_bp_group_id,"
-        + "             'm_offer_id',  e.m_offer_id,"
-        + "             '_identifier', e.name || ' - ' || c_bp_group_.name)) FILTER (WHERE m_offer_bp_group_.isactive='Y') AS TEXT)"
-        + "     FROM M_Offer_BP_Group m_offer_bp_group_ "
-        + "      INNER JOIN C_BP_Group c_bp_group_ ON c_bp_group_.c_bp_group_id=m_offer_bp_group_.c_bp_group_id"
-        + "     WHERE m_offer_bp_group_.m_offer_id=e.m_offer_id) AS \"" + FILTER_BPCATEGORY_ALIAS + "\"";
-      //@formatter:on
-  }
-
-  private String filterBusinessPartner() {
-    //@formatter:off
-    return " (SELECT CAST(json_agg(" //
-        + "    json_build_object(" //
-        + "          'id', m_offer_bpartner_.m_offer_bpartner_id,"//
-        + "          'c_bpartner_id', c_bpartner_.c_bpartner_id," //
-        + "          'm_offer_id',  e.m_offer_id,"//
-        + "          '_identifier', e.name || ' - ' || c_bpartner_.name)) FILTER (WHERE m_offer_bpartner_.isactive='Y') AS TEXT)"
-        + "   FROM M_Offer_BPArtner m_offer_bpartner_ "
-        + "    INNER JOIN c_bpartner c_bpartner_ ON c_bpartner_.c_bpartner_id=m_offer_bpartner_.c_bpartner_id"
-        + "   WHERE m_offer_bpartner_.m_offer_id=e.m_offer_id) AS \"" + FILTER_BPARTNER_ALIAS + "\"";
-    //@formatter:on
-  }
-
+  
   @Override
   public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
     JSONObject recordJson = new JSONObject(rowMap);
