@@ -12,7 +12,7 @@ import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.HAS_NEGATIV
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.HAS_VERIFIED_RETURN_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.INVOICE_CREATED_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.IS_QUOTATION_SQL;
-import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.ORDER_BASE_JOINS;
+import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.buildConditionalJoins;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.ORDER_TYPE_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.PAID_AMOUNT_SQL;
 import static com.doceleguas.pos.webservices.orders.OrderQueryHelper.STATUS_SQL;
@@ -148,7 +148,7 @@ public class OrdersFilterModel extends Model {
     sql.append(sortColumnSql).append(" AS __lastsortvalue, ");
     sql.append(selectList);
     sql.append(" FROM c_order ord");
-    sql.append(ORDER_BASE_JOINS);
+    sql.append(buildConditionalJoins(selectList, sortColumnSql, components.whereClause));
     sql.append(components.whereClause);
     
     // Compound keyset pagination: skip rows already returned in previous pages
@@ -212,7 +212,7 @@ public class OrdersFilterModel extends Model {
     // Build the COUNT query (no ORDER BY, LIMIT, OFFSET needed)
     StringBuilder sql = new StringBuilder();
     sql.append("SELECT COUNT(*) FROM c_order ord");
-    sql.append(ORDER_BASE_JOINS);
+    sql.append(buildConditionalJoins(components.whereClause));
     sql.append(components.whereClause);
     
     log.debug("OrderModel COUNT SQL: {}", sql.toString());

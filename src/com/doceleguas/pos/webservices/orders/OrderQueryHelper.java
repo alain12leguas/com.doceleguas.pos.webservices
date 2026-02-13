@@ -7,6 +7,7 @@
 package com.doceleguas.pos.webservices.orders;
 
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -119,9 +120,13 @@ public final class OrderQueryHelper {
       + "WHEN doctype.isreturn = 'Y' THEN 'Refunded' "
       + "WHEN doctype.docsubtypeso = 'OB' THEN 'Under Evaluation' "
       + "WHEN ord.iscancelled = 'Y' THEN 'Cancelled' "
-      + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) = 0 THEN 'UnPaid' "
-      + "WHEN ord.grandtotal > 0 AND (SELECT COALESCE(SUM(fps.paidamt), 0) FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) < ord.grandtotal THEN 'Partially Paid' "
-      + "ELSE 'Paid' END)";
+      + "WHEN ord.grandtotal <= 0 THEN 'Paid' "
+      + "ELSE (SELECT CASE "
+      + "WHEN COALESCE(SUM(fps.paidamt), 0) = 0 THEN 'UnPaid' "
+      + "WHEN COALESCE(SUM(fps.paidamt), 0) < ord.grandtotal THEN 'Partially Paid' "
+      + "ELSE 'Paid' END "
+      + "FROM fin_payment_schedule fps WHERE fps.c_order_id = ord.c_order_id) "
+      + "END)";
   
   /**
    * SQL EXISTS expression to check if invoice was created.
@@ -172,6 +177,81 @@ public final class OrderQueryHelper {
       + " LEFT JOIN c_bpartner bp ON ord.c_bpartner_id = bp.c_bpartner_id"
       + " LEFT JOIN ad_user salesrep ON ord.salesrep_id = salesrep.ad_user_id"
       + " LEFT JOIN c_doctype doctype ON ord.c_doctypetarget_id = doctype.c_doctype_id";
+  
+  // ============================================
+  // Individual JOIN clauses (for conditional inclusion)
+  // ============================================
+  
+  private static final String JOIN_OBPOS = 
+      " LEFT JOIN obpos_applications obpos ON ord.em_obpos_applications_id = obpos.obpos_applications_id";
+  private static final String JOIN_ORG = 
+      " LEFT JOIN ad_org org ON ord.ad_org_id = org.ad_org_id";
+  private static final String JOIN_TRXORG = 
+      " LEFT JOIN ad_org trxorg ON obpos.ad_org_id = trxorg.ad_org_id";
+  private static final String JOIN_BP = 
+      " LEFT JOIN c_bpartner bp ON ord.c_bpartner_id = bp.c_bpartner_id";
+  private static final String JOIN_SALESREP = 
+      " LEFT JOIN ad_user salesrep ON ord.salesrep_id = salesrep.ad_user_id";
+  private static final String JOIN_DOCTYPE = 
+      " LEFT JOIN c_doctype doctype ON ord.c_doctypetarget_id = doctype.c_doctype_id";
+  
+  // ============================================
+  // Conditional JOIN Builder
+  // ============================================
+  
+  /**
+   * Builds a JOIN clause including only the JOINs whose table aliases are referenced
+   * by the provided SQL fragments (SELECT list, WHERE clause, ORDER BY, etc.).
+   * 
+   * <p>This avoids joining tables that are never referenced in the query,
+   * significantly reducing I/O — especially for COUNT queries where only
+   * the WHERE clause matters.</p>
+   * 
+   * @param sqlParts One or more SQL text fragments to analyze for alias references
+   * @return A string of LEFT JOIN clauses, including only those needed
+   */
+  public static String buildConditionalJoins(String... sqlParts) {
+    StringBuilder combined = new StringBuilder();
+    for (String part : sqlParts) {
+      if (part != null) {
+        combined.append(" ").append(part).append(" ");
+      }
+    }
+    String sql = combined.toString().toLowerCase();
+    
+    StringBuilder joins = new StringBuilder();
+    
+    boolean needsObpos = usesAlias(sql, "obpos");
+    boolean needsTrxorg = usesAlias(sql, "trxorg");
+    boolean needsOrg = usesAlias(sql, "org");
+    boolean needsBp = usesAlias(sql, "bp");
+    boolean needsSalesrep = usesAlias(sql, "salesrep");
+    boolean needsDoctype = usesAlias(sql, "doctype");
+    
+    // trxorg depends on obpos (trxorg joins through obpos table)
+    if (needsTrxorg) {
+      needsObpos = true;
+    }
+    
+    if (needsObpos) joins.append(JOIN_OBPOS);
+    if (needsOrg) joins.append(JOIN_ORG);
+    if (needsTrxorg) joins.append(JOIN_TRXORG);
+    if (needsBp) joins.append(JOIN_BP);
+    if (needsSalesrep) joins.append(JOIN_SALESREP);
+    if (needsDoctype) joins.append(JOIN_DOCTYPE);
+    
+    return joins.toString();
+  }
+  
+  /**
+   * Checks if the SQL text references a specific table alias (e.g. "bp.", "org.").
+   * Uses word-boundary matching to avoid false positives — for example,
+   * "trxorg.name" will NOT match alias "org".
+   */
+  private static boolean usesAlias(String sqlLower, String alias) {
+    Pattern p = Pattern.compile("(?<![a-zA-Z0-9_])" + alias + "\\.");
+    return p.matcher(sqlLower).find();
+  }
   
   // ============================================
   // Private Constructor (Utility Class)
