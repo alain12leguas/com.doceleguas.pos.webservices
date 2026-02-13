@@ -375,7 +375,7 @@ public class OrderModel extends Model {
         + "t.cascade as \"cascade\", "
         + "t.doctaxamount as \"docTaxAmount\", "
         + "ot.line as \"lineNo\", "
-        + "t.c_taxcategory_id as \"taxBase\", "
+        + "t.c_taxcategory_id as \"taxBase\" "
         // + "t.isspecialtax as \"isSpecialTax\" "
         + "FROM c_ordertax ot "
         + "JOIN c_tax t ON ot.c_tax_id = t.c_tax_id "
