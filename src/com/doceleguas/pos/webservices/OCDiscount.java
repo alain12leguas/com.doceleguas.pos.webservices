@@ -33,7 +33,7 @@ public class OCDiscount extends Model {
     String lastId = jsonParams.optString("lastId", null);
     String lastUpdated = jsonParams.optString("lastUpdated", null);
     //@formatter:off    
-    String sql = "SELECT " + selectList + ", " //
+    String sql1 = "SELECT " + selectList + ", " //
             + " e.isactive as \"isActive\"," //
             + " CAST(bp_cat.js AS text) \"" + FILTER_BPCATEGORY_ALIAS + "\","
             + " CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\","
@@ -77,6 +77,28 @@ public class OCDiscount extends Model {
 			+ "      OR "
 			+ "      (e.org_selection = 'N' AND EXISTS (SELECT 1 FROM m_offer_organization o WHERE o.m_offer_id = e.m_offer_id AND o.ad_org_id = :orgId AND o.isactive = 'Y'))"
 			+ "  )";
+    
+    String sql = "WITH filtros_precalculados AS ( " +
+            "  SELECT e.m_offer_id, " +
+            "  EXISTS (SELECT 1 FROM m_offer_pricelist p WHERE p.m_offer_id = e.m_offer_id AND p.m_pricelist_id = :priceListId AND p.isactive = 'Y') as tiene_pl, " +
+            "  EXISTS (SELECT 1 FROM m_offer_organization o WHERE o.m_offer_id = e.m_offer_id AND o.ad_org_id = :orgId AND o.isactive = 'Y') as tiene_org " +
+            "  FROM m_offer e WHERE e.ad_client_id = :clientId AND e.isactive = 'Y' " +
+            ") " +
+            "SELECT e.m_offer_id, e.isactive AS \"isActive\", "
+            + " CAST(bp_cat.js AS text) \"" + FILTER_BPCATEGORY_ALIAS + "\","
+            + " CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\","
+	        + " CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\","
+            + " CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS +"\"" +
+            "FROM m_offer e " +
+            "INNER JOIN filtros_precalculados f ON e.m_offer_id = f.m_offer_id " +
+            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', m_obg.m_offer_bp_group_id, 'c_bp_group_id', cbg.c_bp_group_id, '_identifier', e.name || ' - ' || cbg.name)) AS js FROM m_offer_bp_group m_obg JOIN c_bp_group cbg ON cbg.c_bp_group_id = m_obg.c_bp_group_id WHERE m_obg.m_offer_id = e.m_offer_id AND m_obg.isactive = 'Y') bp_cat ON TRUE " +
+            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', mobp.m_offer_bpartner_id, 'c_bpartner_id', cbp.c_bpartner_id, '_identifier', e.name || ' - ' || cbp.name)) AS js FROM m_offer_bpartner mobp JOIN c_bpartner cbp ON cbp.c_bpartner_id = mobp.c_bpartner_id WHERE mobp.m_offer_id = e.m_offer_id AND mobp.isactive = 'Y') bp_part ON TRUE " +
+            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', mopc.m_offer_prod_cat_id, 'm_product_category_id', mpc.m_product_category_id, '_identifier', e.name || ' - ' || mpc.name)) AS js FROM m_offer_prod_cat mopc JOIN m_product_category mpc ON mpc.m_product_category_id = mopc.m_product_category_id WHERE mopc.m_offer_id = e.m_offer_id AND mopc.isactive = 'Y') prod_cat ON TRUE " +
+            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', mop.m_offer_product_id, 'm_product_id', mp.m_product_id, 'm_product_value', mp.value, 'm_offer_disc_qty', mop.em_obdisc_qty, '_identifier', e.name || ' - ' || mp.name)) AS js FROM m_offer_product mop JOIN m_product mp ON mp.m_product_id = mop.m_product_id WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y') prod ON TRUE " +
+            "WHERE ((e.pricelist_selection = 'Y' AND NOT f.tiene_pl) OR (e.pricelist_selection = 'N' AND f.tiene_pl)) " +
+            "AND ((e.org_selection = 'Y' AND NOT f.tiene_org) OR (e.org_selection = 'N' AND f.tiene_org)) " +
+            "AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id =:currencyId) " +
+            "AND e.ad_org_id IN :orgs ";
     if (lastUpdated != null) {
         sql += " AND e.updated > :lastUpdated";
       } else {
