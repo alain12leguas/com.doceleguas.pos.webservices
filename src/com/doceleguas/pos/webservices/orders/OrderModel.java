@@ -200,7 +200,7 @@ public class OrderModel extends Model {
         + "t.rate as \"taxRate\", "
         + "t.doctaxamount as \"docTaxAmount\", "
         + "olt.line as \"lineNo\", "
-        + "t.cascade as \"cascade\", "
+        + "t.cascade as \"cascade\" "
         // + "t.isspecialtax as \"isSpecialTax\" "
         + "FROM c_orderlinetax olt "
         + "JOIN c_tax t ON olt.c_tax_id = t.c_tax_id "
