@@ -32,85 +32,113 @@ public class OCDiscount extends Model {
     Long limit = jsonParams.optLong("limit", 1000);
     String lastId = jsonParams.optString("lastId", null);
     String lastUpdated = jsonParams.optString("lastUpdated", null);
-    //@formatter:off    
-    String sql1 = "SELECT " + selectList + ", " //
-            + " e.isactive as \"isActive\"," //
-            + " CAST(bp_cat.js AS text) \"" + FILTER_BPCATEGORY_ALIAS + "\","
-            + " CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\","
-	        + " CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\","
-            + " CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS +"\""
-            + " FROM M_Offer e" //
-            + " LEFT JOIN LATERAL (" 
-			+ "   SELECT json_agg(json_build_object('id', m_obg.m_offer_bp_group_id, 'c_bp_group_id', cbg.c_bp_group_id, '_identifier', e.name || ' - ' || cbg.name)) AS js"
-			+ "   FROM m_offer_bp_group m_obg "
-			+ "   INNER JOIN c_bp_group cbg ON cbg.c_bp_group_id = m_obg.c_bp_group_id"
-			+ "   WHERE m_obg.m_offer_id = e.m_offer_id AND m_obg.isactive = 'Y' "
-			+ " ) bp_cat ON TRUE "
-			+ " LEFT JOIN LATERAL ("
-			+ "   SELECT json_agg(json_build_object('id', mobp.m_offer_bpartner_id, 'c_bpartner_id', cbp.c_bpartner_id, '_identifier', e.name || ' - ' || cbp.name)) AS js"
-			+ "   FROM m_offer_bpartner mobp"
-			+ "   INNER JOIN c_bpartner cbp ON cbp.c_bpartner_id = mobp.c_bpartner_id"
-			+ "   WHERE mobp.m_offer_id = e.m_offer_id AND mobp.isactive = 'Y'"
-			+ " ) bp_part ON TRUE "			
-			+ " LEFT JOIN LATERAL ("
-			+ "   SELECT json_agg(json_build_object('id', mopc.m_offer_prod_cat_id, 'm_product_category_id', mpc.m_product_category_id, '_identifier', e.name || ' - ' || mpc.name)) AS js"
-			+ "   FROM m_offer_prod_cat mopc "
-			+ "   INNER JOIN m_product_category mpc ON mpc.m_product_category_id = mopc.m_product_category_id"
-			+ "   WHERE mopc.m_offer_id = e.m_offer_id AND mopc.isactive = 'Y'"
-			+ " ) prod_cat ON TRUE"			
-			+ " LEFT JOIN LATERAL ("
-			+ "   SELECT json_agg(json_build_object('id', mop.m_offer_product_id, 'm_product_id', mp.m_product_id, 'm_product_value', mp.value, 'm_offer_disc_qty', mop.em_obdisc_qty, '_identifier', e.name || ' - ' || mp.name)) AS js"
-			+ "   FROM m_offer_product mop"
-			+ "   INNER JOIN m_product mp ON mp.m_product_id = mop.m_product_id"
-			+ "   WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y'"
-			+ " ) prod ON TRUE"			
-			+ " WHERE e.ad_client_id = :clientId"
-			+ "  AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id = :currencyId)"
-			+ "  AND e.ad_org_id IN :orgs"
-			+ " AND ("
-			+ "      (e.pricelist_selection = 'Y' AND NOT EXISTS (SELECT 1 FROM m_offer_pricelist p WHERE p.m_offer_id = e.m_offer_id AND p.m_pricelist_id = :priceListId AND p.isactive = 'Y'))"
-			+ "      OR" 
-			+ "      (e.pricelist_selection = 'N' AND EXISTS (SELECT 1 FROM m_offer_pricelist p WHERE p.m_offer_id = e.m_offer_id AND p.m_pricelist_id = :priceListId AND p.isactive = 'Y'))"
-			+ "  )"
-			+ "  AND ("
-			+ "     (e.org_selection = 'Y' AND NOT EXISTS (SELECT 1 FROM m_offer_organization o WHERE o.m_offer_id = e.m_offer_id AND o.ad_org_id = :orgId AND o.isactive = 'Y'))"
-			+ "      OR "
-			+ "      (e.org_selection = 'N' AND EXISTS (SELECT 1 FROM m_offer_organization o WHERE o.m_offer_id = e.m_offer_id AND o.ad_org_id = :orgId AND o.isactive = 'Y'))"
-			+ "  )";
+    StringBuilder sql = new StringBuilder();
     
-    String sql = "WITH filtros_precalculados AS ( " +
-            "  SELECT e.m_offer_id, " +
-            "  EXISTS (SELECT 1 FROM m_offer_pricelist p WHERE p.m_offer_id = e.m_offer_id AND p.m_pricelist_id = :priceListId AND p.isactive = 'Y') as tiene_pl, " +
-            "  EXISTS (SELECT 1 FROM m_offer_organization o WHERE o.m_offer_id = e.m_offer_id AND o.ad_org_id = :orgId AND o.isactive = 'Y') as tiene_org " +
-            "  FROM m_offer e WHERE e.ad_client_id = :clientId AND e.isactive = 'Y' " +
-            ") " +
-            "SELECT e.m_offer_id, e.isactive AS \"isActive\", "
-            + " CAST(bp_cat.js AS text) \"" + FILTER_BPCATEGORY_ALIAS + "\","
-            + " CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\","
-	        + " CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\","
-            + " CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS +"\"" +
-            "FROM m_offer e " +
-            "INNER JOIN filtros_precalculados f ON e.m_offer_id = f.m_offer_id " +
-            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', m_obg.m_offer_bp_group_id, 'c_bp_group_id', cbg.c_bp_group_id, '_identifier', e.name || ' - ' || cbg.name)) AS js FROM m_offer_bp_group m_obg JOIN c_bp_group cbg ON cbg.c_bp_group_id = m_obg.c_bp_group_id WHERE m_obg.m_offer_id = e.m_offer_id AND m_obg.isactive = 'Y') bp_cat ON TRUE " +
-            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', mobp.m_offer_bpartner_id, 'c_bpartner_id', cbp.c_bpartner_id, '_identifier', e.name || ' - ' || cbp.name)) AS js FROM m_offer_bpartner mobp JOIN c_bpartner cbp ON cbp.c_bpartner_id = mobp.c_bpartner_id WHERE mobp.m_offer_id = e.m_offer_id AND mobp.isactive = 'Y') bp_part ON TRUE " +
-            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', mopc.m_offer_prod_cat_id, 'm_product_category_id', mpc.m_product_category_id, '_identifier', e.name || ' - ' || mpc.name)) AS js FROM m_offer_prod_cat mopc JOIN m_product_category mpc ON mpc.m_product_category_id = mopc.m_product_category_id WHERE mopc.m_offer_id = e.m_offer_id AND mopc.isactive = 'Y') prod_cat ON TRUE " +
-            "LEFT JOIN LATERAL (SELECT json_agg(json_build_object('id', mop.m_offer_product_id, 'm_product_id', mp.m_product_id, 'm_product_value', mp.value, 'm_offer_disc_qty', mop.em_obdisc_qty, '_identifier', e.name || ' - ' || mp.name)) AS js FROM m_offer_product mop JOIN m_product mp ON mp.m_product_id = mop.m_product_id WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y') prod ON TRUE " +
-            "WHERE ((e.pricelist_selection = 'Y' AND NOT f.tiene_pl) OR (e.pricelist_selection = 'N' AND f.tiene_pl)) " +
-            "AND ((e.org_selection = 'Y' AND NOT f.tiene_org) OR (e.org_selection = 'N' AND f.tiene_org)) " +
-            "AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id =:currencyId) " +
-            "AND e.ad_org_id IN :orgs ";
+    sql.append("SELECT ");
+    sql.append(     selectList);
+    sql.append("    ,e.isactive ");
+    sql.append("    ,CAST(bp_cat.js AS text) AS \"" + FILTER_BPCATEGORY_ALIAS + "\"");
+    sql.append("    ,CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS +"\"");
+    sql.append("    ,CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS +"\"");
+    sql.append("    ,CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS + "\" ");
+    sql.append("FROM M_Offer e ");
+    sql.append("LEFT JOIN LATERAL ( ");
+    sql.append("    SELECT json_agg( ");
+    sql.append("        json_build_object( ");
+    sql.append("            'id', m_obg.m_offer_bp_group_id, ");
+    sql.append("            'c_bp_group_id', cbg.c_bp_group_id, ");
+    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(cbg.name, '') ");
+    sql.append("        ) ");
+    sql.append("    ) AS js ");
+    sql.append("    FROM m_offer_bp_group m_obg  ");
+    sql.append("    INNER JOIN c_bp_group cbg ON cbg.c_bp_group_id = m_obg.c_bp_group_id ");
+    sql.append("    WHERE m_obg.m_offer_id = e.m_offer_id AND m_obg.isactive = 'Y' ");
+    sql.append(") bp_cat ON TRUE  ");
+    sql.append("LEFT JOIN LATERAL ( ");
+    sql.append("    SELECT json_agg( ");
+    sql.append("        json_build_object( ");
+    sql.append("            'id', mobp.m_offer_bpartner_id, ");
+    sql.append("            'c_bpartner_id', cbp.c_bpartner_id, ");
+    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(cbp.name, '') ");
+    sql.append("        ) ");
+    sql.append("    ) AS js ");
+    sql.append("    FROM m_offer_bpartner mobp ");
+    sql.append("    INNER JOIN c_bpartner cbp ON cbp.c_bpartner_id = mobp.c_bpartner_id ");
+    sql.append("    WHERE mobp.m_offer_id = e.m_offer_id AND mobp.isactive = 'Y' ");
+    sql.append(") bp_part ON TRUE  ");
+    sql.append("LEFT JOIN LATERAL ( ");
+    sql.append("    SELECT json_agg( ");
+    sql.append("        json_build_object( ");
+    sql.append("            'id', mopc.m_offer_prod_cat_id, ");
+    sql.append("            'm_product_category_id', mpc.m_product_category_id, ");
+    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mpc.name, '') ");
+    sql.append("        ) ");
+    sql.append("    ) AS js ");
+    sql.append("    FROM m_offer_prod_cat mopc  ");
+    sql.append("    INNER JOIN m_product_category mpc ON mpc.m_product_category_id = mopc.m_product_category_id ");
+    sql.append("    WHERE mopc.m_offer_id = e.m_offer_id AND mopc.isactive = 'Y' ");
+    sql.append(") prod_cat ON TRUE ");
+    sql.append("LEFT JOIN LATERAL ( ");
+    sql.append("    SELECT json_agg( ");
+    sql.append("        json_build_object( ");
+    sql.append("            'id', mop.m_offer_product_id, ");
+    sql.append("            'm_product_id', mp.m_product_id, ");
+    sql.append("            'm_product_value', mp.value, "); 
+    sql.append("            'm_offer_disc_qty', mop.em_obdisc_qty, ");
+    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mp.name, '') ");
+    sql.append("        ) ");
+    sql.append("    ) AS js ");
+    sql.append("    FROM m_offer_product mop ");
+    sql.append("    INNER JOIN m_product mp ON mp.m_product_id = mop.m_product_id ");
+    sql.append("    WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y' ");
+    sql.append(") prod ON TRUE ");
+    sql.append("WHERE e.isactive = 'Y'  ");
+    sql.append("  AND e.ad_client_id = :clientId ");
+    sql.append("  AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id = :currencyId) ");
+    sql.append("  AND e.ad_org_id IN :orgs ");
+    sql.append("  AND CASE e.pricelist_selection ");
+    sql.append("          WHEN 'Y' THEN NOT EXISTS ( ");
+    sql.append("              SELECT 1 FROM m_offer_pricelist p  ");
+    sql.append("              WHERE p.m_offer_id = e.m_offer_id  ");
+    sql.append("                AND p.m_pricelist_id = :priceListId ");
+    sql.append("                AND p.isactive = 'Y' ");
+    sql.append("          ) ");
+    sql.append("          WHEN 'N' THEN EXISTS ( ");
+    sql.append("              SELECT 1 FROM m_offer_pricelist p  ");
+    sql.append("              WHERE p.m_offer_id = e.m_offer_id  ");
+    sql.append("                AND p.m_pricelist_id = :priceListId ");
+    sql.append("                AND p.isactive = 'Y' ");
+    sql.append("          ) ");
+    sql.append("      END ");
+    sql.append("  AND CASE e.org_selection ");
+    sql.append("          WHEN 'Y' THEN NOT EXISTS ( ");
+    sql.append("              SELECT 1 FROM m_offer_organization o  ");
+    sql.append("              WHERE o.m_offer_id = e.m_offer_id  ");
+    sql.append("                AND o.ad_org_id = :orgId  ");
+    sql.append("                AND o.isactive = 'Y' ");
+    sql.append("          ) ");
+    sql.append("          WHEN 'N' THEN EXISTS ( ");
+    sql.append("              SELECT 1 FROM m_offer_organization o  ");
+    sql.append("              WHERE o.m_offer_id = e.m_offer_id  ");
+    sql.append("                AND o.ad_org_id = :orgId  ");
+    sql.append("                AND o.isactive = 'Y' ");
+    sql.append("          ) ");
+    sql.append("      END ");
+
     if (lastUpdated != null) {
-        sql += " AND e.updated > :lastUpdated";
+        sql.append(" AND e.updated > :lastUpdated ");
       } else {
-        sql += "  AND e.IsActive='Y'";
+    	  sql.append("  AND e.IsActive='Y' ");
       }
       if (lastId != null) {
-        sql += " AND e.m_offer_id > :lastId";
+    	  sql.append(" AND e.m_offer_id > :lastId ");
       }
-      sql += " ORDER  BY e.m_offer_id " //
-          + " LIMIT :limit";
+      sql.append(" ORDER  BY e.m_offer_id ");
+      sql.append(" LIMIT :limit ");
+    
+    String finalQuery = sql.toString();      
     PriceList priceList = POSUtils.getPriceListByOrgId(organization);
-    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
+    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(finalQuery);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
     query.setParameter("clientId", client)
         .setParameter("orgId", organization)

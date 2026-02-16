@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+  <database name="MODIFIED TABLE M_OFFER_BPARTNER">
+    <table name="M_OFFER_BPARTNER" primaryKey="M_OFFER_BPARTNER_KEY">
+      <index name="EM_OCWS_MOFFER_BPARTNER" unique="false">
+        <index-column name="M_OFFER_ID"/>
+        <index-column name="C_BPARTNER_ID"/>
+        <index-column name="M_OFFER_BPARTNER_ID"/>
+        <whereClause><![CDATA[ISACTIVE='Y']]></whereClause>
+      </index>
+    </table>
+  </database>

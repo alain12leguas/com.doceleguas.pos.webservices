@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+  <database name="MODIFIED TABLE M_OFFER">
+    <table name="M_OFFER" primaryKey="M_OFFER_KEY">
+      <index name="EM_OCWS_MOFFER_MAIN_FILTER" unique="false">
+        <index-column name="AD_CLIENT_ID"/>
+        <index-column name="AD_ORG_ID"/>
+        <index-column name="PRICELIST_SELECTION"/>
+        <index-column name="ORG_SELECTION"/>
+        <whereClause><![CDATA[ISACTIVE='Y' AND (em_obdisc_c_currency_id IS NULL OR em_obdisc_c_currency_id IS NOT NULL)]]></whereClause>
+      </index>
+    </table>
+  </database>

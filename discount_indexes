@@ -1,0 +1,12 @@
+-- Para eliminar el Seq Scan en productos
+CREATE INDEX CONCURRENTLY idx_m_offer_product_offer ON m_offer_product (m_offer_id, isactive);
+
+-- Para acelerar los filtros de configuración
+CREATE INDEX CONCURRENTLY idx_m_offer_pl_search ON m_offer_pricelist (m_offer_id, m_pricelist_id, isactive);
+CREATE INDEX CONCURRENTLY idx_m_offer_org_search ON m_offer_organization (m_offer_id, ad_org_id, isactive);
+
+-- Para el filtro principal de ofertas
+CREATE INDEX CONCURRENTLY idx_m_offer_main_filter ON m_offer (ad_client_id, isactive, em_obdisc_c_currency_id);
+
+CREATE INDEX idx_m_offer_product_offer_active 
+ON m_offer_product (m_offer_id, isactive);
