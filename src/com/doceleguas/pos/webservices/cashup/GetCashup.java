@@ -197,7 +197,7 @@ public class GetCashup implements WebService {
     }
     // Also check Import Entry errors
     String sqlIE = "SELECT 1 FROM C_Import_Entry "
-        + "WHERE EM_Obpos_Posterminal = ? "
+        + "WHERE EM_Obpos_Applications_ID = ? "
         + "  AND Typeofdata = 'OBPOS_App_Cashup' "
         + "  AND Importstatus = 'Error' "
         + "LIMIT 1";
