@@ -30,4 +30,40 @@
         <class>com.doceleguas.pos.webservices.GetOrder</class>
         <singleton>true</singleton>
     </bean>
+    <!-- Cash Management / Cash Up WebServices -->
+    <bean>
+        <name>GetCashup</name>
+        <class>com.doceleguas.pos.webservices.cashup.GetCashup</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
+        <name>ProcessCashManagement</name>
+        <class>com.doceleguas.pos.webservices.cashup.ProcessCashManagement</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
+        <name>ProcessCashClose</name>
+        <class>com.doceleguas.pos.webservices.cashup.ProcessCashClose</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
+        <name>CashCloseMaster</name>
+        <class>com.doceleguas.pos.webservices.cashup.CashCloseMaster</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
+        <name>CashCloseSlave</name>
+        <class>com.doceleguas.pos.webservices.cashup.CashCloseSlave</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
+        <name>CashMgmtMaster</name>
+        <class>com.doceleguas.pos.webservices.cashup.CashMgmtMaster</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
+        <name>GetCashMgmtEvents</name>
+        <class>com.doceleguas.pos.webservices.cashup.GetCashMgmtEvents</class>
+        <singleton>true</singleton>
+    </bean>
 </provider>
