@@ -42,7 +42,7 @@ import org.openbravo.service.web.WebService;
  * <h3>Response:</h3>
  * Returns JSON with slave terminal statuses and aggregated payment method summaries.
  */
-public class CashCloseMaster implements WebService {
+public class GetCashCloseMaster implements WebService {
 
   private static final Logger log = LogManager.getLogger();
 
@@ -138,7 +138,7 @@ public class CashCloseMaster implements WebService {
 
     } catch (Throwable t) {
       Throwable cause = DbUtility.getUnderlyingSQLException(t);
-      log.error("Error in CashCloseMaster WebService", cause);
+      log.error("Error in GetCashCloseMaster WebService", cause);
       sendErrorResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
           "Error in cash close master: " + cause.getMessage());
     } finally {

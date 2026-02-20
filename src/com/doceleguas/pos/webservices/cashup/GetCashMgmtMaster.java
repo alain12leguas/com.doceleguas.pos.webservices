@@ -36,7 +36,7 @@ import org.openbravo.service.web.WebService;
  *   <li>{@code pos} - Master Terminal ID (UUID)</li>
  * </ul>
  */
-public class CashMgmtMaster implements WebService {
+public class GetCashMgmtMaster implements WebService {
 
   private static final Logger log = LogManager.getLogger();
 
@@ -181,7 +181,7 @@ public class CashMgmtMaster implements WebService {
 
     } catch (Throwable t) {
       Throwable cause = DbUtility.getUnderlyingSQLException(t);
-      log.error("Error in CashMgmtMaster WebService", cause);
+      log.error("Error in GetCashMgmtMaster WebService", cause);
       sendErrorResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
           "Error in cash management master: " + cause.getMessage());
     } finally {

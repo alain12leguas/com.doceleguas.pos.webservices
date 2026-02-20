@@ -47,18 +47,18 @@
         <singleton>true</singleton>
     </bean>
     <bean>
-        <name>CashCloseMaster</name>
-        <class>com.doceleguas.pos.webservices.cashup.CashCloseMaster</class>
+        <name>GetCashCloseMaster</name>
+        <class>com.doceleguas.pos.webservices.cashup.GetCashCloseMaster</class>
         <singleton>true</singleton>
     </bean>
     <bean>
-        <name>CashCloseSlave</name>
-        <class>com.doceleguas.pos.webservices.cashup.CashCloseSlave</class>
+        <name>GetCashCloseSlave</name>
+        <class>com.doceleguas.pos.webservices.cashup.GetCashCloseSlave</class>
         <singleton>true</singleton>
     </bean>
     <bean>
-        <name>CashMgmtMaster</name>
-        <class>com.doceleguas.pos.webservices.cashup.CashMgmtMaster</class>
+        <name>GetCashMgmtMaster</name>
+        <class>com.doceleguas.pos.webservices.cashup.GetCashMgmtMaster</class>
         <singleton>true</singleton>
     </bean>
     <bean>

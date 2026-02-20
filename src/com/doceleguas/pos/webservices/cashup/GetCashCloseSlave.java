@@ -42,7 +42,7 @@ import org.openbravo.service.web.WebService;
  * Returns JSON indicating whether the association was successful and whether
  * the slave cashup now has a parent cashup.
  */
-public class CashCloseSlave implements WebService {
+public class GetCashCloseSlave implements WebService {
 
   private static final Logger log = LogManager.getLogger();
 
@@ -132,7 +132,7 @@ public class CashCloseSlave implements WebService {
 
     } catch (Throwable t) {
       Throwable cause = DbUtility.getUnderlyingSQLException(t);
-      log.error("Error in CashCloseSlave WebService", cause);
+      log.error("Error in GetCashCloseSlave WebService", cause);
       sendErrorResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
           "Error in cash close slave: " + cause.getMessage());
     } finally {
