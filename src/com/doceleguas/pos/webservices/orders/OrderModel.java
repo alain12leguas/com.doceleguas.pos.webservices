@@ -134,6 +134,7 @@ public class OrderModel extends Model {
         + "ol.linenetamt as \"lineNetAmount\", "
         + "ol.line_gross_amount as \"lineGrossAmount\", "
         + "ol.c_tax_id as \"tax\", "
+        + "ol.updated as \"loaded\", "
         + "t.name as \"taxName\", "
         + "t.rate as \"taxRate\", "
         + "ol.description as \"description\", "
