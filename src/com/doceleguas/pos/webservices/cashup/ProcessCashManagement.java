@@ -114,7 +114,22 @@ public class ProcessCashManagement implements WebService {
       Connection conn = OBDal.getInstance().getConnection();
 
       // 2. Update/get the cashup entity — Openbravo utility, returns entity needed by hooks
-      OBPOSAppCashup cashup = UpdateCashup.getAndUpdateCashUp(cashUpId, jsonBody, cashUpDate);
+      //    The POS now sends cashUpReportInformation (full cashup snapshot) inside
+      //    the CM message body. We must extract it and pass it to UpdateCashup, which
+      //    expects a JsonCashupPayload — NOT the raw CM event body.
+      //    Matches how Openbravo's ProcessCashMgmt.java (L64) works:
+      //      jsoncashup = jsonsent.getJSONObject("cashUpReportInformation");
+      //      UpdateCashup.getAndUpdateCashUp(cashUpId, jsoncashup, cashUpDate);
+      OBPOSAppCashup cashup;
+      if (jsonBody.has("cashUpReportInformation")) {
+        JSONObject jsonCashupReport = jsonBody.getJSONObject("cashUpReportInformation");
+        cashup = UpdateCashup.getAndUpdateCashUp(cashUpId, jsonCashupReport, cashUpDate);
+      } else {
+        // Fallback: no snapshot sent (legacy behavior) — just fetch/create the cashup
+        // without updating totals. This avoids the previous bug where the raw CM body
+        // was passed to UpdateCashup (which expected cashup-format JSON).
+        cashup = UpdateCashup.getAndUpdateCashUp(cashUpId, jsonBody, cashUpDate);
+      }
 
       // 3. Find PaymentMethodCashup ID by native SQL
       //    Replaces: OBCriteria<OBPOSPaymentMethodCashup> with Restrictions
