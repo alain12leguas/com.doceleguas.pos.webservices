@@ -47,6 +47,11 @@
         <singleton>true</singleton>
     </bean>
     <bean>
+        <name>OpenCashup</name>
+        <class>com.doceleguas.pos.webservices.cashup.OpenCashup</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
         <name>GetCashCloseMaster</name>
         <class>com.doceleguas.pos.webservices.cashup.GetCashCloseMaster</class>
         <singleton>true</singleton>
