@@ -2,7 +2,9 @@ package com.doceleguas.pos.webservices;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
@@ -12,12 +14,17 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.criterion.Restrictions;
+import org.hibernate.query.NativeQuery;
+import org.hibernate.transform.Transformers;
 import org.openbravo.base.exception.OBException;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.dal.service.OBQuery;
+import org.openbravo.erpCommon.businessUtility.Preferences;
+import org.openbravo.erpCommon.businessUtility.Preferences.QueryFilter;
 import org.openbravo.erpCommon.utility.OBError;
 import org.openbravo.erpCommon.utility.OBMessageUtils;
+import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.mobile.core.MobileDefaults;
 import org.openbravo.mobile.core.login.ProfileUtils;
 import org.openbravo.model.ad.access.Role;
@@ -33,6 +40,7 @@ public class Login extends POSLoginHandler {
   public void doPost(HttpServletRequest req, HttpServletResponse res)
       throws IOException, ServletException {
     try {
+      checkTerminalAuth(req);
       ResponseBufferWrapper wrappedRes = new ResponseBufferWrapper(res);
       super.doPost(req, wrappedRes);
       JSONObject jsonResponse = new JSONObject(wrappedRes.getCapturedContent());
@@ -63,6 +71,11 @@ public class Login extends POSLoginHandler {
       error.setTitle(null);
       error.setMessage("The user doesn't have a defined role.");
       responseWithError(res, error);
+    } catch (TerminalLinkedException e) {
+      OBError error = new OBError();
+      error.setTitle(null);
+      error.setMessage(e.getMessage());
+      responseWithError(res, error);
     } catch (Exception e) {
       OBError error = new OBError();
       error.setTitle(OBMessageUtils.getI18NMessage("IDENTIFICATION_FAILURE_TITLE", null));
@@ -70,6 +83,52 @@ public class Login extends POSLoginHandler {
       responseWithError(res, error);
     }
 
+  }
+
+  @SuppressWarnings({ "unchecked", "deprecation" })
+  private boolean checkTerminalAuth(HttpServletRequest request) {
+    String terminalName = request.getParameter("terminalName");
+    String cacheSessionId = request.getParameter("cacheSessionId");
+    try {
+      Map<QueryFilter, Boolean> terminalAuthenticationQueryFilters = new HashMap<>();
+      terminalAuthenticationQueryFilters.put(QueryFilter.ACTIVE, true);
+      terminalAuthenticationQueryFilters.put(QueryFilter.CLIENT, false);
+      terminalAuthenticationQueryFilters.put(QueryFilter.ORGANIZATION, false);
+      boolean terminalAuth = Preferences.YES
+          .equals(Preferences.getPreferenceValue("OBPOS_TerminalAuthentication", true, null, null,
+              null, null, (String) null, terminalAuthenticationQueryFilters));
+      if (!terminalAuth) {
+        return true;
+      }
+      String sql = "SELECT current_cache_session_id, islinked " + "FROM obpos_applications "
+          + "WHERE value = :terminalSearchKey";
+
+      NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
+
+      query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
+
+      query.setParameter("terminalSearchKey", terminalName);
+
+      Map<String, Object> result = (Map<String, Object>) query.uniqueResult();
+
+      if (result != null) {
+        String currentCacheSessionId = (String) result.get("current_cache_session_id");
+        String isLinked = result.get("islinked") != null ? result.get("islinked").toString() : "N";
+        if ("Y".equals(isLinked) && !cacheSessionId.equals(currentCacheSessionId)) {
+          throw new TerminalLinkedException(
+              "The terminal is already linked to another physical device.");
+        }
+        if ("N".equals(isLinked)) {
+          linkTerminal(terminalName, cacheSessionId);
+        }
+      } else {
+        throw new TerminalLinkedException(
+            String.format("No terminal found with searchKey [%s]. ", terminalName));
+      }
+    } catch (final PropertyException ignore) {
+
+    }
+    return true;
   }
 
   private JSONObject getDefaultRoleJson() throws JSONException {
@@ -158,5 +217,27 @@ public class Login extends POSLoginHandler {
       // String appName = "WebPOS";
       return super.getRoles(defaults);
     }
+  }
+
+  class TerminalLinkedException extends OBException {
+    private static final long serialVersionUID = 1L;
+
+    public TerminalLinkedException(String msg) {
+      super(msg);
+    }
+  }
+
+  public int linkTerminal(String terminalName, String newSessionId) {
+    String sql = "UPDATE obpos_applications " + //
+        " SET current_cache_session_id = :sessionId, " + //
+        "    islinked='Y', " + //
+        "    updated = now() " + //
+        " WHERE value = :searchKey";
+
+    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
+    query.setParameter("sessionId", newSessionId);
+    query.setParameter("searchKey", terminalName);
+    int rowsAffected = query.executeUpdate();
+    return rowsAffected;
   }
 }
