@@ -71,4 +71,10 @@
         <class>com.doceleguas.pos.webservices.cashup.GetCashMgmtEvents</class>
         <singleton>true</singleton>
     </bean>
+    <!-- Credit Management WebServices -->
+    <bean>
+        <name>CheckBusinessPartnerCredit</name>
+        <class>com.doceleguas.pos.webservices.CheckBusinessPartnerCredit</class>
+        <singleton>true</singleton>
+    </bean>
 </provider>
