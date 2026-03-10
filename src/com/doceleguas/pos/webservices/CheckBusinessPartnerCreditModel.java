@@ -40,7 +40,7 @@ public class CheckBusinessPartnerCreditModel extends Model {
         + " bp.name AS \"bpName\", " //
         + " COALESCE(bp.so_creditlimit, 0) AS \"creditLimit\", " //
         + " COALESCE(bp.so_creditused, 0) AS \"creditUsed\", " //
-        + " COALESCE(bp.smfpcf_credit, 0) AS \"availableCredit\" " //
+        + " COALESCE(bp.em_smfpcf_credit, 0) AS \"availableCredit\" " //
         + " FROM c_bpartner bp " //
         + " WHERE bp.c_bpartner_id = :businessPartnerId " //
         + " AND bp.ad_client_id IN :clients";
