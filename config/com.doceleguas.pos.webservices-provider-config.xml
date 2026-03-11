@@ -77,4 +77,9 @@
         <class>com.doceleguas.pos.webservices.CheckBusinessPartnerCredit</class>
         <singleton>true</singleton>
     </bean>
+    <bean>
+        <name>PreLoginActions</name>
+        <class>com.doceleguas.pos.webservices.PreLoginActions</class>
+        <singleton>true</singleton>
+    </bean>
 </provider>
