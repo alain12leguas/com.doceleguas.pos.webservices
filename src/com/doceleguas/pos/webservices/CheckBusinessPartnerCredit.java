@@ -31,8 +31,12 @@ import org.openbravo.service.web.WebService;
  * <h3>Required Parameters:</h3>
  * <ul>
  *   <li>{@code businessPartnerId} — UUID of the Business Partner to check</li>
- *   <li>{@code client} — Client ID for OBContext security</li>
- *   <li>{@code organization} — Organization ID for OBContext security</li>
+ * </ul>
+ *
+ * <h3>Optional Parameters:</h3>
+ * <ul>
+ *   <li>{@code client} — Client ID for OBContext security (defaults to current session client)</li>
+ *   <li>{@code organization} — Organization ID for OBContext security (defaults to current session organization)</li>
  * </ul>
  *
  * <h3>Response Format:</h3>
@@ -139,9 +143,13 @@ public class CheckBusinessPartnerCredit implements WebService {
 
     JSONObject jsonParams = new JSONObject();
 
-    String client = getRequiredParameter(request, "client");
-    String organization = getRequiredParameter(request, "organization");
     String businessPartnerId = getRequiredParameter(request, "businessPartnerId");
+
+    // client and organization are optional — fall back to the authenticated session context
+    String client = getOptionalParameter(request, "client",
+        OBContext.getOBContext().getCurrentClient().getId());
+    String organization = getOptionalParameter(request, "organization",
+        OBContext.getOBContext().getCurrentOrganization().getId());
 
     jsonParams.put("client", client);
     jsonParams.put("organization", organization);
@@ -163,6 +171,23 @@ public class CheckBusinessPartnerCredit implements WebService {
     String value = request.getParameter(paramName);
     if (value == null || value.trim().isEmpty()) {
       throw new MissingParameterException("Missing required parameter: '" + paramName + "'");
+    }
+    return value.trim();
+  }
+
+  /**
+   * Gets an optional parameter from the request, falling back to a default value.
+   *
+   * @param request The HTTP request
+   * @param paramName The parameter name
+   * @param defaultValue The fallback value if the parameter is missing or empty
+   * @return The parameter value (trimmed) or the default value
+   */
+  private String getOptionalParameter(HttpServletRequest request, String paramName,
+      String defaultValue) {
+    String value = request.getParameter(paramName);
+    if (value == null || value.trim().isEmpty()) {
+      return defaultValue;
     }
     return value.trim();
   }
