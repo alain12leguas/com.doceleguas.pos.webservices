@@ -12,20 +12,25 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.criterion.Restrictions;
-import org.hibernate.query.NativeQuery;
 import org.openbravo.base.exception.OBException;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.dal.service.OBQuery;
+import org.openbravo.erpCommon.businessUtility.Preferences;
 import org.openbravo.erpCommon.utility.OBError;
 import org.openbravo.erpCommon.utility.OBMessageUtils;
+import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.mobile.core.MobileDefaults;
 import org.openbravo.mobile.core.login.ProfileUtils;
 import org.openbravo.model.ad.access.Role;
 import org.openbravo.model.ad.access.User;
 import org.openbravo.model.ad.system.Language;
+import org.openbravo.retail.posterminal.OBPOSApplications;
 import org.openbravo.retail.posterminal.POSDefaults;
 import org.openbravo.retail.posterminal.POSLoginHandler;
+
+import com.doceleguas.pos.webservices.utils.WebServiceUtils;
+import com.doceleguas.pos.webservices.utils.WebServiceUtils.TerminalAuthenticationException;
 
 public class Login extends POSLoginHandler {
   private static final long serialVersionUID = 1L;
@@ -33,7 +38,13 @@ public class Login extends POSLoginHandler {
   @Override
   public void doPost(HttpServletRequest req, HttpServletResponse res)
       throws IOException, ServletException {
+    OBContext.setAdminMode(false);
     try {
+      JSONObject terminalAuthResponse = checkTerminalAuth(req);
+      if (!terminalAuthResponse.getBoolean("success")) {
+        res.getWriter().write(terminalAuthResponse.toString());
+        return;
+      }
       ResponseBufferWrapper wrappedRes = new ResponseBufferWrapper(res);
       super.doPost(req, wrappedRes);
       JSONObject jsonResponse = new JSONObject(wrappedRes.getCapturedContent());
@@ -64,18 +75,57 @@ public class Login extends POSLoginHandler {
       error.setTitle(null);
       error.setMessage("The user doesn't have a defined role.");
       responseWithError(res, error);
-    } catch (TerminalLinkedException e) {
+    } catch (TerminalAuthenticationException e) {
       OBError error = new OBError();
       error.setTitle(null);
       error.setMessage(e.getMessage());
       responseWithError(res, error);
     } catch (Exception e) {
       OBError error = new OBError();
+      e.printStackTrace();
       error.setTitle(OBMessageUtils.getI18NMessage("IDENTIFICATION_FAILURE_TITLE", null));
       error.setMessage(OBMessageUtils.getI18NMessage("IDENTIFICATION_FAILURE_MSG", null));
       responseWithError(res, error);
+    } finally {
+      OBContext.restorePreviousMode();
     }
+  }
 
+  private JSONObject checkTerminalAuth(HttpServletRequest request)
+      throws TerminalAuthenticationException, JSONException {
+    String cacheSessionId = request.getParameter("cacheSessionId");
+    String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
+    JSONObject response = new JSONObject();
+    try {
+      String terminalAuthenticationValue = WebServiceUtils.getTerminalAuthentication();
+      if (Preferences.NO.equals(terminalAuthenticationValue)) {
+        response.put("success", true);
+        return response;
+      }
+      if (terminalKeyIdentifier == null) {
+        response.put("success", false);
+        response.put("error", "MISSING_TERMINAL_IDENTIFIER");
+        return response;
+      }
+
+      OBPOSApplications terminal = WebServiceUtils
+          .getTerminalByKeyIdentifier(terminalKeyIdentifier);
+
+      if (!terminal.isLinked()) {
+        terminal.setCurrentCacheSession(cacheSessionId);
+        terminal.setLinked(true);
+        response.put("success", true);
+        return response;
+      }
+      if (terminal.isLinked() && !terminal.getCurrentCacheSession().equals(cacheSessionId)) {
+        throw new TerminalAuthenticationException(
+            OBMessageUtils.getI18NMessage("OBPOS_TerminalAuthChangeMsg", null));
+      }
+    } catch (final PropertyException ignore) {
+
+    }
+    response.put("success", true);
+    return response;
   }
 
   private JSONObject getDefaultRoleJson() throws JSONException {
@@ -174,17 +224,4 @@ public class Login extends POSLoginHandler {
     }
   }
 
-  public int linkTerminal(String terminalName, String newSessionId) {
-    String sql = "UPDATE obpos_applications " + //
-        " SET current_cache_session_id = :sessionId, " + //
-        "    islinked='Y', " + //
-        "    updated = now() " + //
-        " WHERE value = :searchKey";
-
-    NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
-    query.setParameter("sessionId", newSessionId);
-    query.setParameter("searchKey", terminalName);
-    int rowsAffected = query.executeUpdate();
-    return rowsAffected;
-  }
 }

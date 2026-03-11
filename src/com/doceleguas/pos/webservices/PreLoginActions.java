@@ -6,9 +6,7 @@
  */
 package com.doceleguas.pos.webservices;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import javax.servlet.http.HttpServletRequest;
@@ -23,10 +21,7 @@ import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBCriteria;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.dal.service.OBQuery;
-import org.openbravo.erpCommon.businessUtility.Preferences;
-import org.openbravo.erpCommon.businessUtility.Preferences.QueryFilter;
 import org.openbravo.erpCommon.utility.OBMessageUtils;
-import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.model.ad.access.FormAccess;
 import org.openbravo.model.ad.access.RoleOrganization;
 import org.openbravo.model.ad.access.User;
@@ -37,6 +32,9 @@ import org.openbravo.retail.posterminal.TerminalAccess;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
+import com.doceleguas.pos.webservices.utils.WebServiceUtils;
+import com.doceleguas.pos.webservices.utils.WebServiceUtils.TerminalAuthenticationException;
+
 public class PreLoginActions implements WebService {
 
   private static final Logger log = LogManager.getLogger();
@@ -46,25 +44,6 @@ public class PreLoginActions implements WebService {
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
         "GET method not supported. Use POST instead.");
-  }
-
-  /**
-   * @return
-   * @throws PropertyException
-   */
-  private String getTerminalAuthentication() throws PropertyException {
-    String terminalAuthenticationValue;
-    try {
-      Map<QueryFilter, Boolean> terminalAuthenticationQueryFilters = new HashMap<>();
-      terminalAuthenticationQueryFilters.put(QueryFilter.ACTIVE, true);
-      terminalAuthenticationQueryFilters.put(QueryFilter.CLIENT, false);
-      terminalAuthenticationQueryFilters.put(QueryFilter.ORGANIZATION, false);
-      terminalAuthenticationValue = Preferences.getPreferenceValue("OBPOS_TerminalAuthentication",
-          true, null, null, null, null, (String) null, terminalAuthenticationQueryFilters);
-    } catch (PropertyException e) {
-      terminalAuthenticationValue = "Y";
-    }
-    return terminalAuthenticationValue;
   }
 
   /**
@@ -104,12 +83,14 @@ public class PreLoginActions implements WebService {
       response.setContentType("application/json");
       response.setCharacterEncoding("UTF-8");
       String action = request.getParameter("action");
+      String cacheSessionId = request.getParameter("cacheSessionId");
+      String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
       JSONObject responseJson = new JSONObject();
       switch (action) {
         case "CHECK_TERMINAL_AUTH":
           String terminalAuthenticationValue = "";
           try {
-            terminalAuthenticationValue = getTerminalAuthentication();
+            terminalAuthenticationValue = WebServiceUtils.getTerminalAuthentication();
             responseJson.put("success", true);
             responseJson.put("terminalAuthentication", terminalAuthenticationValue);
             response.getWriter().write(responseJson.toString());
@@ -122,43 +103,31 @@ public class PreLoginActions implements WebService {
           }
           break;
         case "LINK_TERMINAL":
-          String cacheSessionId = request.getParameter("cacheSessionId");
-          String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
           String username = request.getParameter("paramUsername");
           String password = request.getParameter("paramPassword");
 
-          OBCriteria<OBPOSApplications> qApp = OBDal.getInstance()
-              .createCriteria(OBPOSApplications.class);
-          qApp.add(Restrictions.eq(OBPOSApplications.PROPERTY_TERMINALKEY, terminalKeyIdentifier));
-          qApp.setFilterOnReadableOrganization(false);
-          qApp.setFilterOnReadableClients(false);
-          List<OBPOSApplications> apps = qApp.list();
-          if (apps.size() == 1) {
-            OBPOSApplications terminal = ((OBPOSApplications) apps.get(0));
-            if (terminal.isLinked()
-                && !(terminal.getCurrentCacheSession().equals(cacheSessionId))) {
-              throw new TerminalAuthenticationException(
-                  OBMessageUtils.getI18NMessage("OBPOS_TerminalAlreadyLinked", null));
-            }
-
-            Optional<User> user = PasswordHash.getUserWithPassword(username, password);
-            if (!user.isPresent()) {
-              throw new TerminalAuthenticationException(
-                  OBMessageUtils.getI18NMessage("OBPOS_InvalidUserPassword", null));
-            }
-            if (!checkTerminalAccess(user.get().getId(), terminal)) {
-              throw new TerminalAuthenticationException(
-                  OBMessageUtils.getI18NMessage("OBPOS_USER_NO_ACCESS_TO_TERMINAL_TITLE", null));
-            }
-            terminal.setLinked(true);
-            terminal.setCurrentCacheSession(cacheSessionId);
-            responseJson.put("success", true);
-            responseJson.put("terminalSearchKey", terminal.getSearchKey());
-            response.getWriter().write(responseJson.toString());
-          } else {
+          OBPOSApplications terminal = WebServiceUtils
+              .getTerminalByKeyIdentifier(terminalKeyIdentifier);
+          if (terminal.isLinked() && !(terminal.getCurrentCacheSession().equals(cacheSessionId))) {
             throw new TerminalAuthenticationException(
-                OBMessageUtils.getI18NMessage("OBPOS_WrongTerminalKeyIdentifier", null));
+                OBMessageUtils.getI18NMessage("OBPOS_TerminalAlreadyLinked", null));
           }
+
+          Optional<User> user = PasswordHash.getUserWithPassword(username, password);
+          if (!user.isPresent()) {
+            throw new TerminalAuthenticationException(
+                OBMessageUtils.getI18NMessage("OBPOS_InvalidUserPassword", null));
+          }
+          if (!checkTerminalAccess(user.get().getId(), terminal)) {
+            throw new TerminalAuthenticationException(
+                OBMessageUtils.getI18NMessage("OBPOS_USER_NO_ACCESS_TO_TERMINAL_TITLE", null));
+          }
+          terminal.setLinked(true);
+          terminal.setCurrentCacheSession(cacheSessionId);
+          responseJson.put("success", true);
+          responseJson.put("terminalSearchKey", terminal.getSearchKey());
+          response.getWriter().write(responseJson.toString());
+
           break;
         default: {
           throw new TerminalAuthenticationException("Unknown action");
@@ -272,14 +241,6 @@ public class PreLoginActions implements WebService {
       throws Exception {
     sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
         "PUT method not supported. Use POST instead.");
-  }
-
-  private static class TerminalAuthenticationException extends Exception {
-    private static final long serialVersionUID = 1L;
-
-    public TerminalAuthenticationException(String message) {
-      super(message);
-    }
   }
 
   private boolean hasADFormAccess(UserRoles userRole) {
