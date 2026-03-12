@@ -73,15 +73,15 @@ public class POSWebSocketEndpoint {
       String action = json.optString("action", "");
 
       if ("SUBSCRIBE".equals(action)) {
-        String searchKey = json.optString("searchKey", "");
-        if (!searchKey.isEmpty()) {
-          session.getUserProperties().put("searchKey", searchKey);
+        String terminalId = json.optString("terminalId", "");
+        if (!terminalId.isEmpty()) {
+          session.getUserProperties().put("terminalId", terminalId);
           JSONObject response = new JSONObject();
           response.put("type", "SUBSCRIBED");
-          response.put("searchKey", searchKey);
+          response.put("terminalId", terminalId);
           response.put("message", "Successfully subscribed to terminal notifications");
           session.getBasicRemote().sendText(response.toString());
-          log.info("Session {} subscribed to terminal {}", session.getId(), searchKey);
+          log.info("Session {} subscribed to terminal {}", session.getId(), terminalId);
         }
       } else if ("PING".equals(action)) {
         JSONObject response = new JSONObject();
@@ -94,20 +94,20 @@ public class POSWebSocketEndpoint {
     }
   }
 
-  public static void sendMessageToTerminal(String searchKey, JSONObject message) {
+  public static void sendMessageToTerminal(String terminalId, JSONObject message) {
     for (Session session : sessions) {
-      String sessionSearchKey = (String) session.getUserProperties().get("searchKey");
-      if (searchKey.equals(sessionSearchKey) && session.isOpen()) {
+      String sessionTerminalId = (String) session.getUserProperties().get("terminalId");
+      if (terminalId.equals(sessionTerminalId) && session.isOpen()) {
         try {
           session.getBasicRemote().sendText(message.toString());
-          log.info("Message sent to terminal {}: {}", searchKey, message.toString());
+          log.info("Message sent to terminal {}: {}", terminalId, message.toString());
           return;
         } catch (IOException e) {
-          log.error("Error sending message to terminal {}: {}", searchKey, e.getMessage(), e);
+          log.error("Error sending message to terminal {}: {}", terminalId, e.getMessage(), e);
         }
       }
     }
-    log.warn("Terminal {} not connected or not found", searchKey);
+    log.warn("Terminal {} not connected or not found", terminalId);
   }
 
   public static void broadcastMessage(JSONObject message) {
@@ -122,10 +122,10 @@ public class POSWebSocketEndpoint {
     }
   }
 
-  public static boolean isTerminalConnected(String searchKey) {
+  public static boolean isTerminalConnected(String terminalId) {
     for (Session session : sessions) {
-      String sessionSearchKey = (String) session.getUserProperties().get("searchKey");
-      if (searchKey.equals(sessionSearchKey) && session.isOpen()) {
+      String sessionTerminalId = (String) session.getUserProperties().get("terminalId");
+      if (terminalId.equals(sessionTerminalId) && session.isOpen()) {
         return true;
       }
     }

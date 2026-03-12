@@ -32,18 +32,18 @@ public class POSWebSocketService {
     }
   }
 
-  public static JSONObject createNotification(NotificationType type, String searchKey,
+  public static JSONObject createNotification(NotificationType type, String terminalId,
       String message) {
-    return createNotification(type, searchKey, message, null);
+    return createNotification(type, terminalId, message, null);
   }
 
-  public static JSONObject createNotification(NotificationType type, String searchKey,
+  public static JSONObject createNotification(NotificationType type, String terminalId,
       String message, JSONObject data) {
     JSONObject notification = new JSONObject();
     try {
       SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
       notification.put("type", type.getValue());
-      notification.put("searchKey", searchKey);
+      notification.put("terminalId", terminalId);
       notification.put("message", message);
       notification.put("timestamp", sdf.format(new Timestamp(System.currentTimeMillis())));
       if (data != null) {
@@ -55,19 +55,19 @@ public class POSWebSocketService {
     return notification;
   }
 
-  public static boolean sendTerminalUnlinkedNotification(String searchKey, String reason) {
-    JSONObject notification = createNotification(NotificationType.TERMINAL_UNLINKED, searchKey, "");
-    POSWebSocketEndpoint.sendMessageToTerminal(searchKey, notification);
-    log.info("Sent TERMINAL_UNLINKED notification to terminal: {}", searchKey);
-    return POSWebSocketEndpoint.isTerminalConnected(searchKey);
+  public static boolean sendTerminalUnlinkedNotification(String terminalId, String reason) {
+    JSONObject notification = createNotification(NotificationType.TERMINAL_UNLINKED, terminalId, "");
+    POSWebSocketEndpoint.sendMessageToTerminal(terminalId, notification);
+    log.info("Sent TERMINAL_UNLINKED notification to terminal: {}", terminalId);
+    return POSWebSocketEndpoint.isTerminalConnected(terminalId);
   }
 
-  public static boolean sendCustomNotification(String searchKey, NotificationType type,
+  public static boolean sendCustomNotification(String terminalId, NotificationType type,
       String message, JSONObject data) {
-    JSONObject notification = createNotification(type, searchKey, message, data);
-    POSWebSocketEndpoint.sendMessageToTerminal(searchKey, notification);
-    log.info("Sent custom notification type {} to terminal: {}", type.getValue(), searchKey);
-    return POSWebSocketEndpoint.isTerminalConnected(searchKey);
+    JSONObject notification = createNotification(type, terminalId, message, data);
+    POSWebSocketEndpoint.sendMessageToTerminal(terminalId, notification);
+    log.info("Sent custom notification type {} to terminal: {}", type.getValue(), terminalId);
+    return POSWebSocketEndpoint.isTerminalConnected(terminalId);
   }
 
   public static void broadcastNotification(NotificationType type, String message) {
@@ -76,8 +76,8 @@ public class POSWebSocketService {
     log.info("Broadcast notification type {} to all terminals", type.getValue());
   }
 
-  public static boolean isTerminalConnected(String searchKey) {
-    return POSWebSocketEndpoint.isTerminalConnected(searchKey);
+  public static boolean isTerminalConnected(String terminalId) {
+    return POSWebSocketEndpoint.isTerminalConnected(terminalId);
   }
 
   public static int getConnectedTerminalsCount() {

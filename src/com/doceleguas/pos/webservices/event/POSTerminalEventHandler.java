@@ -47,7 +47,7 @@ public class POSTerminalEventHandler extends EntityPersistenceEventObserver {
 
     if (Boolean.TRUE.equals(oldLinked) && Boolean.FALSE.equals(newLinked)) {
       POSWebSocketService.sendTerminalUnlinkedNotification(
-          ((OBPOSApplications) event.getTargetInstance()).getSearchKey(), null);
+          ((OBPOSApplications) event.getTargetInstance()).getId(), null);
 
     }
   }
