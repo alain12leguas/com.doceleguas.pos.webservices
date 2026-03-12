@@ -85,15 +85,13 @@ public class PreLoginActions implements WebService {
       String action = request.getParameter("action");
       String cacheSessionId = request.getParameter("cacheSessionId");
       String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
-      JSONObject responseJson = new JSONObject();
+
       switch (action) {
         case "CHECK_TERMINAL_AUTH":
-          String terminalAuthenticationValue = "";
           try {
-            terminalAuthenticationValue = WebServiceUtils.getTerminalAuthentication();
-            responseJson.put("success", true);
-            responseJson.put("terminalAuthentication", terminalAuthenticationValue);
-            response.getWriter().write(responseJson.toString());
+            JSONObject result = WebServiceUtils.checkTerminalAuthentication(terminalKeyIdentifier);
+            result.put("success", true);
+            response.getWriter().write(result.toString());
 
           } catch (Throwable t) {
             Throwable cause = DbUtility.getUnderlyingSQLException(t);
@@ -103,11 +101,17 @@ public class PreLoginActions implements WebService {
           }
           break;
         case "LINK_TERMINAL":
+          JSONObject responseJson = new JSONObject();
+
           String username = request.getParameter("paramUsername");
           String password = request.getParameter("paramPassword");
 
           OBPOSApplications terminal = WebServiceUtils
               .getTerminalByKeyIdentifier(terminalKeyIdentifier);
+          if (terminal == null) {
+            throw new TerminalAuthenticationException(
+                OBMessageUtils.getI18NMessage("OBPOS_WrongTerminalKeyIdentifier", null));
+          }
           if (terminal.isLinked() && !(terminal.getCurrentCacheSession().equals(cacheSessionId))) {
             throw new TerminalAuthenticationException(
                 OBMessageUtils.getI18NMessage("OBPOS_TerminalAlreadyLinked", null));

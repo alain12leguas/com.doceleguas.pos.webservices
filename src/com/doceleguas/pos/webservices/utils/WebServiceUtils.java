@@ -4,18 +4,33 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.codehaus.jettison.json.JSONException;
+import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.criterion.Restrictions;
 import org.openbravo.dal.service.OBCriteria;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.erpCommon.businessUtility.Preferences;
 import org.openbravo.erpCommon.businessUtility.Preferences.QueryFilter;
-import org.openbravo.erpCommon.utility.OBMessageUtils;
 import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.retail.posterminal.OBPOSApplications;
 
 public class WebServiceUtils {
-  public static OBPOSApplications getTerminalByKeyIdentifier(String terminalKeyIdentifier)
-      throws TerminalAuthenticationException {
+  public static JSONObject checkTerminalAuthentication(String keyIdentifier) throws JSONException {
+    JSONObject result = new JSONObject();
+    String preferenceValue = getTerminalAuthenticationPreference();
+    result.put("terminalAuthentication", preferenceValue);
+    if (keyIdentifier != null) {
+      OBPOSApplications terminal = getTerminalByKeyIdentifier(keyIdentifier);
+      if (terminal != null) {
+        result.put("terminalId", terminal.getId());
+        result.put("isLinked", terminal.isLinked());
+        result.put("cacheSessionId", terminal.getCurrentCacheSession());
+      }
+    }
+    return result;
+  }
+
+  public static OBPOSApplications getTerminalByKeyIdentifier(String terminalKeyIdentifier) {
     OBCriteria<OBPOSApplications> qApp = OBDal.getInstance()
         .createCriteria(OBPOSApplications.class);
     qApp.add(Restrictions.eq(OBPOSApplications.PROPERTY_TERMINALKEY, terminalKeyIdentifier));
@@ -26,12 +41,13 @@ public class WebServiceUtils {
       OBPOSApplications terminal = ((OBPOSApplications) apps.get(0));
       return terminal;
     } else {
-      throw new TerminalAuthenticationException(
-          OBMessageUtils.getI18NMessage("OBPOS_WrongTerminalKeyIdentifier", null));
+      return null;
+      // throw new TerminalAuthenticationException(
+      // OBMessageUtils.getI18NMessage("OBPOS_WrongTerminalKeyIdentifier", null));
     }
   }
 
-  public static String getTerminalAuthentication() throws PropertyException {
+  public static String getTerminalAuthenticationPreference() {
     String terminalAuthenticationValue;
     try {
       Map<QueryFilter, Boolean> terminalAuthenticationQueryFilters = new HashMap<>();

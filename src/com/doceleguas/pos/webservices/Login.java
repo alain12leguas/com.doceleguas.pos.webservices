@@ -19,7 +19,6 @@ import org.openbravo.dal.service.OBQuery;
 import org.openbravo.erpCommon.businessUtility.Preferences;
 import org.openbravo.erpCommon.utility.OBError;
 import org.openbravo.erpCommon.utility.OBMessageUtils;
-import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.mobile.core.MobileDefaults;
 import org.openbravo.mobile.core.login.ProfileUtils;
 import org.openbravo.model.ad.access.Role;
@@ -95,37 +94,35 @@ public class Login extends POSLoginHandler {
       throws TerminalAuthenticationException, JSONException {
     String cacheSessionId = request.getParameter("cacheSessionId");
     String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
-    JSONObject response = new JSONObject();
-    try {
-      String terminalAuthenticationValue = WebServiceUtils.getTerminalAuthentication();
-      if (Preferences.NO.equals(terminalAuthenticationValue)) {
-        response.put("success", true);
-        return response;
-      }
-      if (terminalKeyIdentifier == null) {
-        response.put("success", false);
-        response.put("error", "MISSING_TERMINAL_IDENTIFIER");
-        return response;
-      }
+    // JSONObject response = new JSONObject();
 
-      OBPOSApplications terminal = WebServiceUtils
-          .getTerminalByKeyIdentifier(terminalKeyIdentifier);
-
-      if (!terminal.isLinked()) {
-        terminal.setCurrentCacheSession(cacheSessionId);
-        terminal.setLinked(true);
-        response.put("success", true);
-        return response;
-      }
-      if (terminal.isLinked() && !terminal.getCurrentCacheSession().equals(cacheSessionId)) {
-        throw new TerminalAuthenticationException(
-            OBMessageUtils.getI18NMessage("OBPOS_TerminalAuthChangeMsg", null));
-      }
-    } catch (final PropertyException ignore) {
-
+    JSONObject result = WebServiceUtils.checkTerminalAuthentication(terminalKeyIdentifier);
+    if (Preferences.NO.equals(result.getString("terminalAuthentication"))) {
+      result.put("success", true);
+      return result;
     }
-    response.put("success", true);
-    return response;
+    if (terminalKeyIdentifier == null) {
+      result.put("success", false);
+      result.put("error", "MISSING_TERMINAL_IDENTIFIER");
+      return result;
+    }
+
+    OBPOSApplications terminal = WebServiceUtils.getTerminalByKeyIdentifier(terminalKeyIdentifier);
+    if (terminal == null) {
+      throw new TerminalAuthenticationException(
+          OBMessageUtils.getI18NMessage("OBPOS_WrongTerminalKeyIdentifier", null));
+    }
+    if (terminal.isLinked() && !terminal.getCurrentCacheSession().equals(cacheSessionId)) {
+      throw new TerminalAuthenticationException(
+          OBMessageUtils.getI18NMessage("OBPOS_TerminalAuthChangeMsg", null));
+    }
+    if (!terminal.isLinked()) {
+      terminal.setCurrentCacheSession(cacheSessionId);
+      terminal.setLinked(true);
+    }
+    result.put("success", true);
+    return result;
+
   }
 
   private JSONObject getDefaultRoleJson() throws JSONException {
