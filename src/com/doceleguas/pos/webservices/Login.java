@@ -92,11 +92,13 @@ public class Login extends POSLoginHandler {
 
   private JSONObject checkTerminalAuth(HttpServletRequest request)
       throws TerminalAuthenticationException, JSONException {
+
+    String terminalSearchKey = request.getParameter("terminalName");
     String cacheSessionId = request.getParameter("cacheSessionId");
     String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
     // JSONObject response = new JSONObject();
 
-    JSONObject result = WebServiceUtils.checkTerminalAuthentication(terminalKeyIdentifier);
+    JSONObject result = WebServiceUtils.checkTerminalAuthentication(terminalSearchKey);
     if (Preferences.NO.equals(result.getString("terminalAuthentication"))) {
       result.put("success", true);
       return result;

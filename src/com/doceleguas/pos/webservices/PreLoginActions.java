@@ -85,11 +85,12 @@ public class PreLoginActions implements WebService {
       String action = request.getParameter("action");
       String cacheSessionId = request.getParameter("cacheSessionId");
       String terminalKeyIdentifier = request.getParameter("terminalKeyIdentifier");
+      String terminalSearchKey = request.getParameter("terminalSearchKey");
 
       switch (action) {
         case "CHECK_TERMINAL_AUTH":
           try {
-            JSONObject result = WebServiceUtils.checkTerminalAuthentication(terminalKeyIdentifier);
+            JSONObject result = WebServiceUtils.checkTerminalAuthentication(terminalSearchKey);
             result.put("success", true);
             response.getWriter().write(result.toString());
 

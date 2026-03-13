@@ -11,20 +11,26 @@ import org.openbravo.dal.service.OBCriteria;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.erpCommon.businessUtility.Preferences;
 import org.openbravo.erpCommon.businessUtility.Preferences.QueryFilter;
+import org.openbravo.erpCommon.utility.OBMessageUtils;
 import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.retail.posterminal.OBPOSApplications;
 
 public class WebServiceUtils {
-  public static JSONObject checkTerminalAuthentication(String keyIdentifier) throws JSONException {
+  public static JSONObject checkTerminalAuthentication(String searchKey)
+      throws JSONException, TerminalAuthenticationException {
     JSONObject result = new JSONObject();
     String preferenceValue = getTerminalAuthenticationPreference();
     result.put("terminalAuthentication", preferenceValue);
-    if (keyIdentifier != null) {
-      OBPOSApplications terminal = getTerminalByKeyIdentifier(keyIdentifier);
+    if (searchKey != null) {
+      OBPOSApplications terminal = getTerminalBySearchKey(searchKey);
       if (terminal != null) {
         result.put("terminalId", terminal.getId());
         result.put("isLinked", terminal.isLinked());
+        result.put("terminalKeyIdentifier", terminal.getTerminalKey());
         result.put("cacheSessionId", terminal.getCurrentCacheSession());
+      } else {
+        throw new TerminalAuthenticationException(
+            OBMessageUtils.getI18NMessage("OBPOS_NO_POS_TERMINAL_MSG"));
       }
     }
     return result;
@@ -34,6 +40,23 @@ public class WebServiceUtils {
     OBCriteria<OBPOSApplications> qApp = OBDal.getInstance()
         .createCriteria(OBPOSApplications.class);
     qApp.add(Restrictions.eq(OBPOSApplications.PROPERTY_TERMINALKEY, terminalKeyIdentifier));
+    qApp.setFilterOnReadableOrganization(false);
+    qApp.setFilterOnReadableClients(false);
+    List<OBPOSApplications> apps = qApp.list();
+    if (apps.size() == 1) {
+      OBPOSApplications terminal = ((OBPOSApplications) apps.get(0));
+      return terminal;
+    } else {
+      return null;
+      // throw new TerminalAuthenticationException(
+      // OBMessageUtils.getI18NMessage("OBPOS_WrongTerminalKeyIdentifier", null));
+    }
+  }
+
+  public static OBPOSApplications getTerminalBySearchKey(String searchKey) {
+    OBCriteria<OBPOSApplications> qApp = OBDal.getInstance()
+        .createCriteria(OBPOSApplications.class);
+    qApp.add(Restrictions.eq(OBPOSApplications.PROPERTY_SEARCHKEY, searchKey));
     qApp.setFilterOnReadableOrganization(false);
     qApp.setFilterOnReadableClients(false);
     List<OBPOSApplications> apps = qApp.list();
