@@ -30,7 +30,7 @@ public class WebServiceUtils {
         result.put("cacheSessionId", terminal.getCurrentCacheSession());
       } else {
         throw new TerminalAuthenticationException(
-            OBMessageUtils.getI18NMessage("OBPOS_NO_POS_TERMINAL_MSG"));
+            OBMessageUtils.getI18NMessage("OBPOS_NO_POS_TERMINAL_MSG", new String[] { searchKey }));
       }
     }
     return result;
