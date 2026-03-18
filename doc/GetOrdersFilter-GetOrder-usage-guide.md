@@ -213,7 +213,7 @@ f.{columna}={valor}
 | Filtro | Columna SQL | Operador | Descripción | Equivalente en PaidReceiptsFilter |
 |--------|-------------|----------|-------------|-----------------------------------|
 | `f.documentno` | `ord.documentno` | ILIKE (contains) | Número de documento | `documentNo` con `operator: "contains"` |
-| `f.c_bpartner_id` | `ord.c_bpartner_id` | = (equals) | ID del Business Partner | `businessPartner` con `operator: "equals", isId: true` |
+| `f.customer` | `bp.name`, `bp.value` | ILIKE (contains, OR) | Búsqueda por nombre o código del cliente (join con c_bpartner) | Nuevo filtro — reemplaza a `f.c_bpartner_id` |
 | `f.ad_org_id` | `ord.ad_org_id` | = (equals) | ID de la organización | `organization` |
 | `f.dateordered` | `ord.dateordered` | = (equals) | Fecha exacta de orden (YYYY-MM-DD) | `orderDate` con `operator: "equals"` |
 | `f.datefrom` | `ord.dateordered` | >= (mayor o igual) | Inicio del rango de fechas | `orderDate` con `operator: "filter", params[0]` |
@@ -292,7 +292,7 @@ El filtro `ordertype` tiene manejo especial para clasificar tipos de orden:
 
 **GetOrdersFilter (parámetros URL):**
 ```
-f.c_bpartner_id=EDC5DBD82C3B4E3896B3955E041B242C
+f.customer=Arturo
 f.documentno=VBS2/0000
 f.datefrom=2025-02-03
 ```

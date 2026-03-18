@@ -277,6 +277,12 @@ public class OrdersFilterModel extends Model {
           // documentno uses ILIKE (contains)
           whereClause.append(" AND UPPER(ord.documentno) LIKE UPPER(:").append(column).append(")");
           filterParams.add(new FilterParam(column, "%" + value + "%"));
+        } else if (column.equals("customer")) {
+          // Customer text search: contains match on bp.name OR bp.value (searchKey)
+          whereClause.append(" AND (UPPER(bp.name) LIKE UPPER(:customerName)")
+                     .append(" OR UPPER(bp.value) LIKE UPPER(:customerValue))");
+          filterParams.add(new FilterParam("customerName", "%" + value + "%"));
+          filterParams.add(new FilterParam("customerValue", "%" + value + "%"));
         } else if (column.equals("dateordered")) {
           // Date uses equals with DATE cast
           whereClause.append(" AND ord.dateordered = :").append(column);
