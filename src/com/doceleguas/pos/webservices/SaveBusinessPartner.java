@@ -45,7 +45,7 @@ public class SaveBusinessPartner implements WebService {
       }
       final JSONObject bparnterJson = new JSONObject(sb.toString());
       updateCustomerHeader(conn, bparnterJson);
-      updateContactInfo(conn, bparnterJson);
+      updateOrCreateContactInfo(conn, bparnterJson);
       updateLocations(conn, bparnterJson);
       deleteLocations(conn, bparnterJson);
       conn.commit();
@@ -112,16 +112,27 @@ public class SaveBusinessPartner implements WebService {
     }
   }
 
-  private int updateContactInfo(Connection conn, JSONObject customer)
+  private int updateOrCreateContactInfo(Connection conn, JSONObject customer)
       throws JSONException, SQLException {
+
     JSONObject contactJson = customer.getJSONObject("contact");
-    String sql = "UPDATE AD_USER SET firstname = ?, lastname = ?, phone = ?, email = ? WHERE AD_USER_ID = ?";
+    String id = contactJson.getString("id");
+    boolean isNew = !existRecord(conn, "AD_USER", id);
+
+    String sql;
+    if (isNew) {
+      sql = "INSERT INTO AD_USER (firstname, lastname, phone, email, AD_USER_ID) VALUES (?, ?, ?, ?, ?)";
+    } else {
+      sql = "UPDATE AD_USER SET firstname = ?, lastname = ?, phone = ?, email = ? WHERE AD_USER_ID = ?";
+    }
+
     try (PreparedStatement ps = conn.prepareStatement(sql)) {
       ps.setString(1, contactJson.getString("firstName"));
       ps.setString(2, contactJson.getString("lastName"));
       ps.setString(3, contactJson.getString("phone"));
       ps.setString(4, contactJson.getString("email"));
-      ps.setString(5, contactJson.getString("id"));
+      ps.setString(5, id);
+
       return ps.executeUpdate();
     }
   }
