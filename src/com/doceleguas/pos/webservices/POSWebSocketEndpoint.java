@@ -12,14 +12,10 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.websocket.CloseReason;
-import javax.websocket.EncodeException;
 import javax.websocket.OnClose;
 import javax.websocket.OnError;
 import javax.websocket.OnMessage;
 import javax.websocket.OnOpen;
-import javax.websocket.RemoteEndpoint;
-import javax.websocket.SendHandler;
-import javax.websocket.SendResult;
 import javax.websocket.Session;
 import javax.websocket.server.ServerEndpoint;
 
@@ -33,8 +29,7 @@ public class POSWebSocketEndpoint {
 
   private static final Logger log = LogManager.getLogger();
 
-  private static final Set<Session> sessions = Collections
-      .newSetFromMap(new ConcurrentHashMap<>());
+  private static final Set<Session> sessions = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
   @OnOpen
   public void onOpen(Session session) {
