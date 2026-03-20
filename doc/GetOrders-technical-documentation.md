@@ -122,6 +122,7 @@ Consultar **múltiples órdenes** aplicando filtros dinámicos, con soporte para
 |-----------|------|-------------|
 | `client` | UUID | ID del cliente Openbravo |
 | `organization` | UUID | ID de la organización |
+| `pos` | UUID | ID del terminal POS (OBPOS_Applications_ID). Filtra órdenes por terminal de origen |
 | `selectList` | String | Columnas SQL a devolver (URL-encoded) |
 
 ## Parámetros Opcionales

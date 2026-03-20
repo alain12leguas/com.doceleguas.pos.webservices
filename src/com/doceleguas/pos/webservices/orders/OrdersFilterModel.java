@@ -180,6 +180,7 @@ public class OrdersFilterModel extends Model {
     // Set parameters
     query.setParameter("clientId", components.clientId);
     query.setParameter("organizationId", components.organizationId);
+    query.setParameter("posTerminalId", components.posTerminalId);
     query.setParameter("limit", limit);
     
     if (hasCursor) {
@@ -223,6 +224,7 @@ public class OrdersFilterModel extends Model {
     // Set parameters
     query.setParameter("clientId", components.clientId);
     query.setParameter("organizationId", components.organizationId);
+    query.setParameter("posTerminalId", components.posTerminalId);
     
     // Set filter parameters
     for (FilterParam fp : components.filterParams) {
@@ -248,6 +250,7 @@ public class OrdersFilterModel extends Model {
   private QueryComponents buildQueryComponents(JSONObject jsonParams) throws JSONException {
     String clientId = jsonParams.getString("client");
     String organizationId = jsonParams.getString("organization");
+    String posTerminalId = jsonParams.getString("pos");
     
     // Parse filters
     JSONArray filters = jsonParams.optJSONArray("filters");
@@ -260,8 +263,8 @@ public class OrdersFilterModel extends Model {
     // Base WHERE conditions
     whereClause.append(" WHERE ord.ad_client_id = :clientId");
     whereClause.append(" AND ord.ad_org_id = :organizationId");
+    whereClause.append(" AND ord.em_obpos_applications_id = :posTerminalId");
     whereClause.append(" AND ord.em_obpos_isdeleted = 'N'");
-    whereClause.append(" AND ord.em_obpos_applications_id IS NOT NULL");
     whereClause.append(" AND ord.docstatus NOT IN ('CJ', 'CA', 'NC', 'AE', 'ME')");
     
     if (filters != null) {
@@ -311,7 +314,7 @@ public class OrdersFilterModel extends Model {
     // Add order type specific conditions
     whereClause.append(getOrderTypeSql(orderTypeFilter));
     
-    return new QueryComponents(whereClause.toString(), filterParams, clientId, organizationId);
+    return new QueryComponents(whereClause.toString(), filterParams, clientId, organizationId, posTerminalId);
   }
   
   /**
@@ -322,13 +325,15 @@ public class OrdersFilterModel extends Model {
     final List<FilterParam> filterParams;
     final String clientId;
     final String organizationId;
+    final String posTerminalId;
     
     QueryComponents(String whereClause, List<FilterParam> filterParams, 
-                    String clientId, String organizationId) {
+                    String clientId, String organizationId, String posTerminalId) {
       this.whereClause = whereClause;
       this.filterParams = filterParams;
       this.clientId = clientId;
       this.organizationId = organizationId;
+      this.posTerminalId = posTerminalId;
     }
   }
   

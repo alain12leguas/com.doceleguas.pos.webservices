@@ -31,6 +31,7 @@ GET /openbravo/ws/com.doceleguas.pos.webservices.GetOrdersFilter
 |-----------|------|-------------|
 | `client` | UUID | ID del cliente Openbravo (AD_Client_ID) |
 | `organization` | UUID | ID de la organización (AD_Org_ID) |
+| `pos` | UUID | ID del terminal POS (OBPOS_Applications_ID). Filtra órdenes por terminal de origen |
 | `selectList` | String | Columnas SQL a devolver (URL-encoded) |
 
 ## Parámetros Opcionales

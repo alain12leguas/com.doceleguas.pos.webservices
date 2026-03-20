@@ -163,10 +163,12 @@ public class GetOrdersFilter implements WebService {
     // Required parameters
     String client = getRequiredParameter(request, "client");
     String organization = getRequiredParameter(request, "organization");
+    String pos = getRequiredParameter(request, "pos");
     String selectList = getRequiredParameter(request, "selectList");
     
     jsonParams.put("client", client);
     jsonParams.put("organization", organization);
+    jsonParams.put("pos", pos);
     jsonParams.put("selectList", selectList);
     
     // Optional pagination parameters (compound keyset pagination)
