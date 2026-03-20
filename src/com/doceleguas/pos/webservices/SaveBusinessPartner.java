@@ -114,25 +114,44 @@ public class SaveBusinessPartner implements WebService {
 
   private int updateOrCreateContactInfo(Connection conn, JSONObject customer)
       throws JSONException, SQLException {
-
+    String bpartnerId = customer.getString("id");
     JSONObject contactJson = customer.getJSONObject("contact");
     String id = contactJson.getString("id");
+    String firstName = contactJson.getString("firstName");
+    String lastName = contactJson.getString("lastName");
+    String email = contactJson.optString("email", null);
+    String phone = contactJson.optString("phone", null);
     boolean isNew = !existRecord(conn, "AD_USER", id);
-
+    String fullName = firstName + " " + lastName;
     String sql;
     if (isNew) {
-      sql = "INSERT INTO AD_USER (firstname, lastname, phone, email, AD_USER_ID) VALUES (?, ?, ?, ?, ?)";
+      sql = "INSERT INTO AD_USER (" //
+          + " name," //
+          + " firstname," //
+          + " lastname,"//
+          + " phone," //
+          + " email," //
+          + " AD_USER_ID," //
+          + " c_bpartner_id," //
+          + " ad_client_id," //
+          + " ad_org_id,"//
+          + " createdby, updatedby, created, updated) SELECT ?, ?, ?, ?, ?, ?, ?, ad_client_id, ad_org_id, '100','100', NOW(), NOW() FROM C_BPartner WHERE C_BPartner_ID = ?";
     } else {
-      sql = "UPDATE AD_USER SET firstname = ?, lastname = ?, phone = ?, email = ? WHERE AD_USER_ID = ?";
+      sql = "UPDATE AD_USER SET name = ?, firstname = ?, lastname = ?, phone = ?, email = ? WHERE AD_USER_ID = ?";
     }
 
     try (PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setString(1, contactJson.getString("firstName"));
+      ps.setString(1, fullName);
       ps.setString(2, contactJson.getString("lastName"));
-      ps.setString(3, contactJson.getString("phone"));
-      ps.setString(4, contactJson.getString("email"));
-      ps.setString(5, id);
+      ps.setString(3, contactJson.getString("lastName"));
+      ps.setString(4, phone);
+      ps.setString(5, email);
+      ps.setString(6, id);
 
+      if (isNew) {
+        ps.setString(7, bpartnerId);
+        ps.setString(8, bpartnerId);
+      }
       return ps.executeUpdate();
     }
   }
