@@ -1,11 +1,13 @@
 package com.doceleguas.pos.webservices;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.query.NativeQuery;
@@ -55,13 +57,9 @@ public class OCProductPrice extends Model {
         + " LIMIT :limit";
 
     final Date terminalDate = new Date();
-    final String posId = getTerminalId(jsonParams);
 
-    // Resolve the terminal's price list
-    final PriceList terminalPriceList = POSUtils.getPriceListByTerminalId(posId);
-    final List<String> priceListIds = terminalPriceList != null
-        ? Collections.singletonList(terminalPriceList.getId())
-        : Collections.emptyList();
+    // Resolve price list IDs: prefer explicit list from frontend, fallback to terminal's PL
+    final List<String> priceListIds = resolvePriceListIds(jsonParams);
 
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
@@ -77,6 +75,36 @@ public class OCProductPrice extends Model {
   @Override
   public String getName() {
     return "ProductPrice";
+  }
+
+  /**
+   * Resolves the list of price list IDs to query.
+   * If the frontend sends a "priceListIds" parameter (comma-separated string),
+   * those IDs are used so the POS can support multiple price lists.
+   * Otherwise falls back to the terminal's single configured price list.
+   */
+  private List<String> resolvePriceListIds(JSONObject jsonParams) throws JSONException {
+    // Try explicit priceListIds from frontend (comma-separated)
+    String priceListIdsParam = jsonParams.optString("priceListIds", null);
+    if (priceListIdsParam != null && !priceListIdsParam.isEmpty()) {
+      List<String> ids = new ArrayList<>();
+      for (String id : priceListIdsParam.split(",")) {
+        String trimmed = id.trim();
+        if (!trimmed.isEmpty()) {
+          ids.add(trimmed);
+        }
+      }
+      if (!ids.isEmpty()) {
+        return ids;
+      }
+    }
+
+    // Fallback: terminal's single price list
+    final String posId = getTerminalId(jsonParams);
+    final PriceList terminalPriceList = POSUtils.getPriceListByTerminalId(posId);
+    return terminalPriceList != null
+        ? Collections.singletonList(terminalPriceList.getId())
+        : Collections.emptyList();
   }
 
   private static String getTerminalId(final JSONObject jsonsent) {
