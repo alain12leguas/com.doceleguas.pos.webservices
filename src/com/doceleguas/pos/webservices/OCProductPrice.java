@@ -58,7 +58,7 @@ public class OCProductPrice extends Model {
     final String posId = getTerminalId(jsonParams);
 
     // Resolve all price list IDs configured for this terminal
-    final List<String> priceListIds = POSUtils.getPriceListsByTerminalId(posId)
+    final List<String> priceListIds = POSUtils.getPriceListByTerminalId(posId)
         .stream()
         .map(pl -> pl.getId())
         .collect(Collectors.toList());
