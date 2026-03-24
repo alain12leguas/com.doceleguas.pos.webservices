@@ -1,8 +1,8 @@
 package com.doceleguas.pos.webservices;
 
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -11,7 +11,7 @@ import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.Transformers;
 import org.openbravo.dal.service.OBDal;
-import org.openbravo.retail.posterminal.OBPOSApplications;
+import org.openbravo.model.pricing.pricelist.PriceList;
 import org.openbravo.retail.posterminal.POSUtils;
 
 /**
@@ -57,11 +57,11 @@ public class OCProductPrice extends Model {
     final Date terminalDate = new Date();
     final String posId = getTerminalId(jsonParams);
 
-    // Resolve all price list IDs configured for this terminal
-    final List<String> priceListIds = POSUtils.getPriceListByTerminalId(posId)
-        .stream()
-        .map(pl -> pl.getId())
-        .collect(Collectors.toList());
+    // Resolve the terminal's price list
+    final PriceList terminalPriceList = POSUtils.getPriceListByTerminalId(posId);
+    final List<String> priceListIds = terminalPriceList != null
+        ? Collections.singletonList(terminalPriceList.getId())
+        : Collections.emptyList();
 
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
