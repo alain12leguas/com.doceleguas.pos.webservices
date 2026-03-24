@@ -25,6 +25,9 @@ public class PreOrderLoaderHook implements OrderLoaderPreProcessHook {
         copyProperties(invoiceInfo, calculatedInvoice);
         jsonOrder.put("calculatedInvoice", calculatedInvoice);
       }
+      if ("layby".equals(jsonOrder.optString("type"))) {
+        jsonOrder.put("isLayaway", true);
+      }
     } catch (Exception e) {
       log.debug("Error cloning order: " + e.getMessage());
     }
