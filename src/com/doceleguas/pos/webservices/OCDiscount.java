@@ -33,13 +33,13 @@ public class OCDiscount extends Model {
     String lastId = jsonParams.optString("lastId", null);
     String lastUpdated = jsonParams.optString("lastUpdated", null);
     StringBuilder sql = new StringBuilder();
-    
+
     sql.append("SELECT ");
-    sql.append(     selectList);
+    sql.append(selectList);
     sql.append("    ,e.isactive ");
     sql.append("    ,CAST(bp_cat.js AS text) AS \"" + FILTER_BPCATEGORY_ALIAS + "\"");
-    sql.append("    ,CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS +"\"");
-    sql.append("    ,CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS +"\"");
+    sql.append("    ,CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\"");
+    sql.append("    ,CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\"");
     sql.append("    ,CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS + "\" ");
     sql.append("FROM M_Offer e ");
     sql.append("LEFT JOIN LATERAL ( ");
@@ -47,7 +47,8 @@ public class OCDiscount extends Model {
     sql.append("        json_build_object( ");
     sql.append("            'id', m_obg.m_offer_bp_group_id, ");
     sql.append("            'c_bp_group_id', cbg.c_bp_group_id, ");
-    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(cbg.name, '') ");
+    sql.append(
+        "            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(cbg.name, '') ");
     sql.append("        ) ");
     sql.append("    ) AS js ");
     sql.append("    FROM m_offer_bp_group m_obg  ");
@@ -59,7 +60,8 @@ public class OCDiscount extends Model {
     sql.append("        json_build_object( ");
     sql.append("            'id', mobp.m_offer_bpartner_id, ");
     sql.append("            'c_bpartner_id', cbp.c_bpartner_id, ");
-    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(cbp.name, '') ");
+    sql.append(
+        "            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(cbp.name, '') ");
     sql.append("        ) ");
     sql.append("    ) AS js ");
     sql.append("    FROM m_offer_bpartner mobp ");
@@ -71,11 +73,13 @@ public class OCDiscount extends Model {
     sql.append("        json_build_object( ");
     sql.append("            'id', mopc.m_offer_prod_cat_id, ");
     sql.append("            'm_product_category_id', mpc.m_product_category_id, ");
-    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mpc.name, '') ");
+    sql.append(
+        "            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mpc.name, '') ");
     sql.append("        ) ");
     sql.append("    ) AS js ");
     sql.append("    FROM m_offer_prod_cat mopc  ");
-    sql.append("    INNER JOIN m_product_category mpc ON mpc.m_product_category_id = mopc.m_product_category_id ");
+    sql.append(
+        "    INNER JOIN m_product_category mpc ON mpc.m_product_category_id = mopc.m_product_category_id ");
     sql.append("    WHERE mopc.m_offer_id = e.m_offer_id AND mopc.isactive = 'Y' ");
     sql.append(") prod_cat ON TRUE ");
     sql.append("LEFT JOIN LATERAL ( ");
@@ -83,18 +87,19 @@ public class OCDiscount extends Model {
     sql.append("        json_build_object( ");
     sql.append("            'id', mop.m_offer_product_id, ");
     sql.append("            'm_product_id', mp.m_product_id, ");
-    sql.append("            'm_product_value', mp.value, "); 
+    sql.append("            'm_product_value', mp.value, ");
     sql.append("            'm_offer_disc_qty', mop.em_obdisc_qty, ");
-    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mp.name, '') ");
+    sql.append(
+        "            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mp.name, '') ");
     sql.append("        ) ");
     sql.append("    ) AS js ");
     sql.append("    FROM m_offer_product mop ");
     sql.append("    INNER JOIN m_product mp ON mp.m_product_id = mop.m_product_id ");
     sql.append("    WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y' ");
     sql.append(") prod ON TRUE ");
-    sql.append("WHERE e.isactive = 'Y'  ");
-    sql.append("  AND e.ad_client_id = :clientId ");
-    sql.append("  AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id = :currencyId) ");
+    sql.append("WHERE e.ad_client_id = :clientId  ");
+    sql.append(
+        "  AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id = :currencyId) ");
     sql.append("  AND e.ad_org_id IN :orgs ");
     sql.append("  AND CASE e.pricelist_selection ");
     sql.append("          WHEN 'Y' THEN NOT EXISTS ( ");
@@ -126,17 +131,17 @@ public class OCDiscount extends Model {
     sql.append("      END ");
 
     if (lastUpdated != null) {
-        sql.append(" AND e.updated > :lastUpdated ");
-      } else {
-    	  sql.append("  AND e.IsActive='Y' ");
-      }
-      if (lastId != null) {
-    	  sql.append(" AND e.m_offer_id > :lastId ");
-      }
-      sql.append(" ORDER  BY e.m_offer_id ");
-      sql.append(" LIMIT :limit ");
-    
-    String finalQuery = sql.toString();      
+      sql.append(" AND e.updated > :lastUpdated ");
+    } else {
+      sql.append("  AND e.IsActive='Y' ");
+    }
+    if (lastId != null) {
+      sql.append(" AND e.m_offer_id > :lastId ");
+    }
+    sql.append(" ORDER  BY e.m_offer_id ");
+    sql.append(" LIMIT :limit ");
+
+    String finalQuery = sql.toString();
     PriceList priceList = POSUtils.getPriceListByOrgId(organization);
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(finalQuery);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
@@ -150,11 +155,11 @@ public class OCDiscount extends Model {
                 .getOrganizationStructureProvider()
                 .getNaturalTree(organization));
     if (lastId != null) {
-        query.setParameter("lastId", lastId);
-      }
+      query.setParameter("lastId", lastId);
+    }
     return query;
   }
-  
+
   @Override
   public JSONObject rowToJson(Map<String, Object> rowMap) throws JSONException {
     JSONObject recordJson = new JSONObject(rowMap);
