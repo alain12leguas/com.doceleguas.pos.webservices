@@ -73,31 +73,42 @@ public class MasterDataWebService implements WebService {
             .trim()
             .replaceAll(" +", " ");
         parameters.put("selectList", selectList);
-        NativeQuery<?> query = model.createQuery(parameters);
+
+        List<NativeQuery<?>> queries = model.createQueries(parameters);
         String lastUpdated = jsonsent.optString("lastUpdated", null);
-        if (lastUpdated != null) {
-          query.setParameter("lastUpdated", Instant.ofEpochMilli(Long.parseLong(lastUpdated)));
-        }
-        query.scroll(ScrollMode.FORWARD_ONLY);
-        ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
-        int i = 0;
+
         JSONArray dataArray = new JSONArray();
-        try {
-          while (scroll.next()) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
-            JSONObject res = model.rowToJson(rowMap);
-            dataArray.put(res);
+        int totalRecords = 0;
+        int queryIndex = 0;
+
+        for (NativeQuery<?> query : queries) {
+          if (lastUpdated != null) {
+            query.setParameter("lastUpdated", Instant.ofEpochMilli(Long.parseLong(lastUpdated)));
           }
-          i++;
-          if (i % 100 == 0) {
-            OBDal.getInstance().flush();
-            OBDal.getInstance().getSession().clear();
+          ScrollableResults scroll = query.scroll(ScrollMode.FORWARD_ONLY);
+          int i = 0;
+          try {
+            while (scroll.next()) {
+              @SuppressWarnings("unchecked")
+              Map<String, Object> rowMap = (Map<String, Object>) scroll.get()[0];
+              JSONObject res = model.rowToJson(rowMap);
+              dataArray.put(res);
+              totalRecords++;
+            }
+            i++;
+            if (i % 100 == 0) {
+              OBDal.getInstance().flush();
+              OBDal.getInstance().getSession().clear();
+            }
+          } finally {
+            scroll.close();
           }
-        } finally {
-          scroll.close();
+          queryIndex++;
         }
+
         responseJSON.put("data", dataArray);
+        responseJSON.put("totalRecords", totalRecords);
+        responseJSON.put("queryCount", queryIndex);
         response.getWriter().write(responseJSON.toString());
       } else {
         MasterDataProcessHQLQuery modelInstance = getModelInstance(modelName);

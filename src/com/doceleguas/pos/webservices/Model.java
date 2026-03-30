@@ -1,5 +1,7 @@
 package com.doceleguas.pos.webservices;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import org.codehaus.jettison.json.JSONException;
@@ -9,7 +11,11 @@ import org.hibernate.query.NativeQuery;
 public abstract class Model {
   public abstract NativeQuery<?> createQuery(JSONObject jsonParams) throws JSONException;
 
-  // public abstract JSONArray exec(JSONObject jsonsent) throws JSONException;
+  public List<NativeQuery<?>> createQueries(JSONObject jsonParams) throws JSONException {
+    List<NativeQuery<?>> queries = new ArrayList<>();
+    queries.add(createQuery(jsonParams));
+    return queries;
+  }
 
   public abstract String getName();
 
