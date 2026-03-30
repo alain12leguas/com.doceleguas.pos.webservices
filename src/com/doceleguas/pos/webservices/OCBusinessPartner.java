@@ -38,13 +38,13 @@ public class OCBusinessPartner extends Model {
         + "                    ON e.c_greeting_id = greeting3_.c_greeting_id"//
         + "       LEFT OUTER JOIN ad_user aduserlist4_"//
         + "                    ON e.c_bpartner_id = aduserlist4_.c_bpartner_id"//
-        + "       CROSS JOIN c_bp_group businesspa5_ "
-        + " WHERE  e.c_bp_group_id = businesspa5_.c_bp_group_id" //
-        + " AND e.iscustomer = 'Y'" //
+        + "                    AND aduserlist4_.EM_OBRETCO_Default_Pos_Contact = 'Y'"//
+        + "                    AND aduserlist4_.isactive = 'Y'"//
+        + " WHERE e.iscustomer = 'Y'" //
         + " AND ( e.ad_client_id IN :clients )"//
         + " AND ( e.ad_org_id IN :orgs )";//
-        //+ " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
-        //+ "     FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
+    // + " AND (aduserlist4_.AD_User_ID in (select max(aduser6_.AD_User_ID) "//
+    // + " FROM AD_User aduser6_ where aduser6_.C_BPartner_ID=e.C_BPartner_ID)) ";
     if (lastUpdated != null) {
       sql += " AND e.updated > :lastUpdated";
     } else {
@@ -107,7 +107,7 @@ public class OCBusinessPartner extends Model {
         + "         'firstName', ad_user_.firstname,"
         + "         'lastName', ad_user_.lastname,"
         + "         'phone', ad_user_.phone,"
-        + "         'email', ad_user_.email)) FILTER (WHERE ad_user_.isactive='Y') AS TEXT)"
+        + "         'email', ad_user_.email)) FILTER (WHERE ad_user_.isactive='Y' AND ad_user_.EM_OBRETCO_Default_Pos_Contact='Y') AS TEXT)"
         + "     FROM ad_user ad_user_ " 
         + "     WHERE ad_user_.c_bpartner_id=e.c_bpartner_id) AS contact";
     //@formatter:on
