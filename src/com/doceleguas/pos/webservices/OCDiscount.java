@@ -21,6 +21,7 @@ public class OCDiscount extends Model {
   final String FILTER_BPARTNER_ALIAS = "discountFilterBPartner";
   final String FILTER_PRODUCTCATEGORY_ALIAS = "discountFilterProdCategory";
   final String FILTER_PRODUCT_ALIAS = "discountFilterProducts";
+  final String FILTER_INCOMPATIBILITY_ALIAS = "incompatibleDiscounts";
 
   @SuppressWarnings("deprecation")
   @Override
@@ -41,6 +42,7 @@ public class OCDiscount extends Model {
     sql.append("    ,CAST(bp_part.js AS text) AS \"" + FILTER_BPARTNER_ALIAS + "\"");
     sql.append("    ,CAST(prod_cat.js AS text) AS \"" + FILTER_PRODUCTCATEGORY_ALIAS + "\"");
     sql.append("    ,CAST(prod.js AS text) AS \"" + FILTER_PRODUCT_ALIAS + "\" ");
+    sql.append("    ,CAST(incompat.js AS text) AS \"" + FILTER_INCOMPATIBILITY_ALIAS + "\" ");
     sql.append("FROM M_Offer e ");
     sql.append("LEFT JOIN LATERAL ( ");
     sql.append("    SELECT json_agg( ");
@@ -98,6 +100,16 @@ public class OCDiscount extends Model {
     sql.append("    INNER JOIN m_product mp ON mp.m_product_id = mop.m_product_id ");
     sql.append("    WHERE mop.m_offer_id = e.m_offer_id AND mop.isactive = 'Y' ");
     sql.append(") prod ON TRUE ");
+    sql.append("LEFT JOIN LATERAL ( ");
+    sql.append("    SELECT json_agg( ");
+    sql.append("        json_build_object( ");
+    sql.append("            'incompatibleType', moi.m_offer_incmptibility_type_id, ");
+    sql.append("            'incompatibleDiscount', moi.m_offer_incmptibility_offer_id ");
+    sql.append("        ) ");
+    sql.append("    ) AS js ");
+    sql.append("    FROM m_offer_incompatibility moi ");
+    sql.append("    WHERE moi.m_offer_id = e.m_offer_id AND moi.isactive = 'Y' ");
+    sql.append(") incompat ON TRUE ");
     sql.append("WHERE e.ad_client_id = :clientId  ");
     sql.append(
         "  AND (e.em_obdisc_c_currency_id IS NULL OR e.em_obdisc_c_currency_id = :currencyId) ");
@@ -179,6 +191,10 @@ public class OCDiscount extends Model {
     if (rowMap.get(FILTER_PRODUCT_ALIAS) != null) {
       recordJson.put(FILTER_PRODUCT_ALIAS,
           new JSONArray((String) rowMap.get(FILTER_PRODUCT_ALIAS)));
+    }
+    if (rowMap.get(FILTER_INCOMPATIBILITY_ALIAS) != null) {
+      recordJson.put(FILTER_INCOMPATIBILITY_ALIAS,
+          new JSONArray((String) rowMap.get(FILTER_INCOMPATIBILITY_ALIAS)));
     }
     return recordJson;
   }
