@@ -56,7 +56,7 @@ Este módulo implementa una serie de **Web Services personalizados** para extend
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
 │  │                        HOOKS Y UTILIDADES                             │   │
 │  ├──────────────────────────────────────────────────────────────────────┤   │
-│  │  PreOrderLoaderHook          │ ResponseBufferWrapper                │   │
+│  │  OcreInvoiceCalculatedInfoHook │ ResponseBufferWrapper              │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -66,7 +66,7 @@ Este módulo implementa una serie de **Web Services personalizados** para extend
 
 ## Endpoints Disponibles
 
-Los endpoints están registrados en el archivo `config/com.doceleguas.pos.webservices-provider-config.xml`:
+Los siguientes endpoints están actualmente expuestos por el módulo (provider config y/o registro de servicios del módulo):
 
 | Endpoint | Clase | Método | Descripción |
 |----------|-------|--------|-------------|
@@ -75,6 +75,20 @@ Los endpoints están registrados en el archivo `config/com.doceleguas.pos.webser
 | `/ws/com.doceleguas.pos.webservices.Terminal` | `LoadTerminal` | GET | Carga la configuración de un terminal POS |
 | `/ws/com.doceleguas.pos.webservices.SaveBusinessPartner` | `SaveBusinessPartner` | POST | Guarda/actualiza un Business Partner |
 | `/ws/com.doceleguas.pos.webservices.GetOrders` | `GetOrders` | GET | Consulta órdenes del backend con filtros |
+| `/ws/com.doceleguas.pos.webservices.SaveOrder` | `SaveOrder` | POST | Recibe pedido en contrato nativo v2 y lo encola en `C_IMPORT_ENTRY` (`OCOrder`) para procesamiento asíncrono |
+
+### Nota sobre `SaveOrder`
+
+`SaveOrder` es asíncrono por diseño:
+
+- request: `messageId`, `posTerminal`, `order`
+- response inmediata: `202 Accepted`
+- procesamiento real: `OCOrderImportRunnable` -> `OcreOrderLoadOrchestrator` -> `CoreOrderPersistenceAdapter`
+
+Para el detalle técnico completo del flujo de pedidos:
+
+- `doc/SaveOrder-and-OCOrder-import.md`
+- `doc/SaveOrder-native-contract-v2.md`
 
 ---
 
@@ -657,10 +671,13 @@ El módulo debe declarar dependencia a:
 ```xml
 <bean>
     <name>GetOrders</name>
-    <class>com.doceleguas.pos.webservices.GetOrdersWebService</class>
+    <class>com.doceleguas.pos.webservices.GetOrders</class>
     <singleton>true</singleton>
 </bean>
 ```
+
+`SaveOrder` no se publica como consulta HQL en este bloque; se expone como WebService del módulo
+en su registro de servicios correspondiente y apunta a `com.doceleguas.pos.webservices.SaveOrder`.
 
 ### Filtros de Entidad (EntityFilter)
 
@@ -849,22 +866,59 @@ mobileappslogin.maxLoad=8.0      # Carga máxima del sistema permitida
 
 ---
 
-## Hooks
+## Hooks (carga de pedidos OCRE)
 
-### PreOrderLoaderHook
+### OcreInvoiceCalculatedInfoHook
 
-**Archivo:** `hooks/PreOrderLoaderHook.java`
+**Archivo:** `orderload/impl/OcreInvoiceCalculatedInfoHook.java`
 
-**Implementa:** `OrderLoaderPreProcessHook`
+**Implementa:** `OcreOrderPreLoadHook` (paquete `orderload.spi`, sin interfaces retail).
 
-**Propósito:** Procesar pedidos antes de ser guardados.
+**Invocación:** `OcreOrderLoadOrchestrator` la ejecuta sobre cada orden normalizada del sobre interno (`data[]`) antes de persistir en Core.
 
 **Funcionalidad:**
-1. Desactiva la generación de factura externa por defecto
+1. Desactiva la generación de factura externa por defecto (`generateExternalInvoice = false`)
 2. Si `ocreIssueInvoice = true`:
    - Clona el pedido completo
    - Copia las propiedades de `calculatedInvoiceInfo` al clon
    - Almacena el clon en `calculatedInvoice`
+
+---
+
+## Motor nativo equivalente a OrderLoader (OCOrder)
+
+### Ubicación principal
+
+- `src/com/doceleguas/pos/webservices/orderload/impl/CoreOrderPersistenceAdapter.java`
+
+### Qué hace
+
+Esta clase implementa el rol de persistencia que antes recaía en runtime sobre `org.openbravo.retail.posterminal.OrderLoader` para el flujo OCOrder:
+
+1. Valida que el payload esté en un escenario soportado (actualmente venta estándar).
+2. Resuelve contexto de terminal (`OBPOS_APPLICATIONS`) y datos base de organización/cliente.
+3. Crea o reutiliza `C_Order` (idempotencia por `documentNo`+org).
+4. Crea líneas en `C_ORDERLINE` resolviendo producto/UOM/precios/impuestos.
+5. Crea pagos `FIN_Payment` resolviendo método/cuenta financiera.
+6. Devuelve JSON de resultado (`RESPONSE_STATUS`, pedidos procesados) al framework de importación.
+
+### Cómo se invoca
+
+Cadena completa de ejecución:
+
+1. `SaveOrder.doPost` recibe contrato nativo (`messageId`, `posTerminal`, `order`) y crea `C_IMPORT_ENTRY` tipo `OCOrder`.
+2. `OCOrderImportEntryProcessor` despacha la fila a `OCOrderImportRunnable`.
+3. `OCOrderImportRunnable` llama `OcreOrderLoadOrchestrator.importEnvelope(...)`.
+4. `OcreOrderLoadOrchestrator` normaliza payload + ejecuta hooks (`OcreOrderPreLoadHook`) y finalmente invoca:
+   - `CoreOrderPersistenceAdapter.persistTransformedEnvelope(...)`.
+5. El resultado marca `ImportEntry` como `Processed` o `Error`.
+
+### Clases relacionadas
+
+- Orquestador: `src/com/doceleguas/pos/webservices/orderload/OcreOrderLoadOrchestrator.java`
+- Normalización: `src/com/doceleguas/pos/webservices/orderload/impl/IdentityExternalEnvelopeTransform.java`
+- Worker cola: `src/com/doceleguas/pos/webservices/orders/loader/OCOrderImportRunnable.java`
+- Entrada WS: `src/com/doceleguas/pos/webservices/SaveOrder.java`
 
 ---
 
@@ -941,6 +995,10 @@ String selectList = parameters.getString("selectList")
     </bean>  
 </provider>
 ```
+
+Nota: además de `provider-config.xml`, el módulo registra servicios adicionales para flujo POS
+asíncrono (incluyendo `SaveOrder`), por lo que la lista de endpoints activos no depende solo de
+este archivo.
 
 ---
 

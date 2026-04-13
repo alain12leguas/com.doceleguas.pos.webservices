@@ -21,6 +21,11 @@
         <singleton>true</singleton>
     </bean>
     <bean>
+        <name>SaveOrder</name>
+        <class>com.doceleguas.pos.webservices.SaveOrder</class>
+        <singleton>true</singleton>
+    </bean>
+    <bean>
         <name>GetOrdersFilter</name>
         <class>com.doceleguas.pos.webservices.GetOrdersFilter</class>
         <singleton>true</singleton>
