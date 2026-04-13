@@ -49,11 +49,9 @@ public class MasterDataWebService implements WebService {
       requestParamsToJson(jsonsent, request);
       User currentUser = getCurrentUser(jsonsent.getString("user"));
       Role defaultPosRole = currentUser.getOBPOSDefaultPOSRole();
-      //User currentUser = OBDal.getInstance().get(User.class, jsonsent.getString("user"));
-      
-      
-      OBContext.setOBContext(currentUser.getId(),
-    		  defaultPosRole.getId(),
+      // User currentUser = OBDal.getInstance().get(User.class, jsonsent.getString("user"));
+
+      OBContext.setOBContext(currentUser.getId(), defaultPosRole.getId(),
           jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
           jsonsent.optString("organization",
               OBContext.getOBContext().getCurrentOrganization().getId()));
@@ -116,36 +114,35 @@ public class MasterDataWebService implements WebService {
         modelInstance.exec(response.getWriter(), jsonsent);
         response.getWriter().write("}");
       }
-    } catch (Exception e) { 
-        Throwable cause = DbUtility.getUnderlyingSQLException(e);
-        log.error("Error Loading Masterdata", e); 
+    } catch (Exception e) {
+      Throwable cause = DbUtility.getUnderlyingSQLException(e);
+      log.error("Error Loading Masterdata", e);
 
-        JSONObject errorResponse = new JSONObject();
-        try {
-            String message = (cause != null && cause.getMessage() != null) 
-                             ? cause.getMessage() 
-                             : "Internal Server Error";
-            
-            errorResponse.put("exception", message);
-                        
-        } catch (JSONException je) {
-            log.error("Error creating JSON error response", je);
-        }
+      JSONObject errorResponse = new JSONObject();
+      try {
+        String message = (cause != null && cause.getMessage() != null) ? cause.getMessage()
+            : "Internal Server Error";
 
-        PrintWriter out = response.getWriter();
-        out.print(errorResponse.toString());
-        out.flush();
+        errorResponse.put("exception", message);
+
+      } catch (JSONException je) {
+        log.error("Error creating JSON error response", je);
+      }
+
+      PrintWriter out = response.getWriter();
+      out.print(errorResponse.toString());
+      out.flush();
     }
   }
 
   private User getCurrentUser(String user) {
-	    String userHqlWhereClause = " usr where usr.username = :username";
-	    OBQuery<User> queryUser = OBDal.getInstance().createQuery(User.class, userHqlWhereClause);
-	    queryUser.setNamedParameter("username", user);
-	    queryUser.setFilterOnReadableOrganization(false);
-	    queryUser.setMaxResult(1);
-	    return queryUser.uniqueResult();
-}
+    String userHqlWhereClause = " usr where usr.username = :username";
+    OBQuery<User> queryUser = OBDal.getInstance().createQuery(User.class, userHqlWhereClause);
+    queryUser.setNamedParameter("username", user);
+    queryUser.setFilterOnReadableOrganization(false);
+    queryUser.setMaxResult(1);
+    return queryUser.uniqueResult();
+  }
 
   @Override
   public void doPost(String path, HttpServletRequest request, HttpServletResponse response)
