@@ -82,4 +82,9 @@
         <class>com.doceleguas.pos.webservices.PreLoginActions</class>
         <singleton>true</singleton>
     </bean>
+    <bean>
+        <name>Ping</name>
+        <class>com.doceleguas.pos.webservices.Ping</class>
+        <singleton>true</singleton>
+    </bean>
 </provider>
