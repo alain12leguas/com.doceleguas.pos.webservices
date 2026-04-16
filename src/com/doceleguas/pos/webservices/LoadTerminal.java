@@ -1,119 +1,173 @@
+/*
+ ************************************************************************************
+ * Copyright (C) 2026 Doceleguas
+ * Licensed under the Openbravo Public License version 1.0
+ ************************************************************************************
+ */
 package com.doceleguas.pos.webservices;
 
-import java.io.PrintWriter;
-import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.codehaus.jettison.json.JSONArray;
-import org.codehaus.jettison.json.JSONException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONObject;
-import org.hibernate.criterion.Restrictions;
-import org.openbravo.base.weld.WeldUtils;
-import org.openbravo.dal.core.OBContext;
-import org.openbravo.dal.service.OBCriteria;
-import org.openbravo.dal.service.OBDal;
-import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.term.Terminal;
+import org.hibernate.query.NativeQuery;
+import org.hibernate.transform.AliasToEntityMapResultTransformer;
+import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
+/**
+ * WebService endpoint for retrieving Terminal configuration data.
+ * 
+ * This service provides a REST API for retrieving detailed terminal configuration data including
+ * currency, payment methods, price lists, and other terminal-specific settings.
+ * 
+ * <p>
+ * Required parameters:
+ * </p>
+ * <ul>
+ * <li>{@code terminalSearchKey} - Terminal search key (or terminalId)</li>
+ * <li>{@code terminalId} - Terminal UUID (alternative to searchKey)</li>
+ * </ul>
+ * 
+ * <p>
+ * Returns computed array properties:
+ * </p>
+ * <ul>
+ * <li>{@code payments} - Payment methods configured for the terminal</li>
+ * <li>{@code priceLists} - All available price lists</li>
+ * <li>{@code currencyPanel} - Currency denominations for cash payments</li>
+ * <li>{@code cashMgmtDepositEvents} - Deposit events for cash management</li>
+ * <li>{@code cashMgmtDropEvents} - Drop events for cash management</li>
+ * <li>{@code exchangeRates} - Currency exchange rates</li>
+ * </ul>
+ */
 public class LoadTerminal implements WebService {
+
+  private static final Logger log = LogManager.getLogger();
 
   @Override
   public void doGet(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
 
+    long startTime = System.currentTimeMillis();
+    response.setContentType("application/json");
+    response.setCharacterEncoding("UTF-8");
+
     try {
-      Terminal terminal = WeldUtils.getInstances(Terminal.class).get(0);
-      // request.getParameter("terminal")
-      JSONObject jsonsent = new JSONObject();
-      JSONObject parameters = new JSONObject();
-      parameters.put("terminalTime", Instant.now().toString());
-      parameters.put("terminalTimeOffset", new JSONObject("{\"value\":0}"));
-      jsonsent.put("parameters", parameters);
-      // jsonsent.put("client", request.getParameter("client"));
-      // jsonsent.put("organization", request.getParameter("organization"));
-      // jsonsent.put("termnalName", request.getParameter("terminalName"));
+      JSONObject jsonParams = new JSONObject();
+      jsonParams.put("terminalSearchKey", request.getParameter("terminalName"));
+      // OBPOSApplications app = getTerminal(jsonParams.getString("terminalName"));
+      // jsonParams.put("client", app.getOrganization().getClient().getId());
+      // jsonParams.put("organization", app.getOrganization().getId());
+      // jsonParams.put("pos", app.getId());
+      // log.debug("GetTerminal request: {}", jsonParams.toString());
 
-      requestParamsToJson(jsonsent, request);
-      OBPOSApplications app = getTerminal(jsonsent.getString("terminalName"));
-      jsonsent.put("client", app.getOrganization().getClient().getId());
-      jsonsent.put("organization", app.getOrganization().getId());
-      jsonsent.put("pos", app.getId());
-      OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
-          OBContext.getOBContext().getRole().getId(),
-          jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
-          jsonsent.optString("organization",
-              OBContext.getOBContext().getCurrentOrganization().getId()));
-      JSONObject terminalJson = terminal.exec(jsonsent);
-      response.setContentType("application/json");
-      response.setCharacterEncoding("UTF-8");
-      response.getWriter().print(terminalJson.toString());
-    } catch (Exception e) {
-      JSONObject errorResponse = new JSONObject();
-      try {
-        errorResponse.put("messageType", "error");
-        errorResponse.put("messageText", e.getMessage());
-        PrintWriter out = response.getWriter();
-        out.print(errorResponse.toString());
-        out.flush();
-      } catch (Exception e1) {
-        e1.printStackTrace();
-      }
-    }
-  }
+      // OBContext.setOBContext(OBContext.getOBContext().getUser().getId(),
+      // OBContext.getOBContext().getRole().getId(), jsonParams.getString("client"),
+      // jsonParams.getString("organization"));
 
-  private OBPOSApplications getTerminal(String searchKey) {
-    OBCriteria<OBPOSApplications> terminalCriteria = OBDal.getInstance()
-        .createCriteria(OBPOSApplications.class);
-    terminalCriteria.add(Restrictions.eq(OBPOSApplications.PROPERTY_SEARCHKEY, searchKey));
-    terminalCriteria.setMaxResults(1);
-    return (OBPOSApplications) terminalCriteria.uniqueResult();
-  }
+      TerminalModel terminalModel = new TerminalModel();
+      NativeQuery query = terminalModel.createQuery(jsonParams);
+      query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
 
-  public JSONObject requestParamsToJson(JSONObject jsonParams, HttpServletRequest request)
-      throws JSONException {
-    Map<String, String[]> params = request.getParameterMap();
+      List results = query.list();
 
-    for (Map.Entry<String, String[]> entry : params.entrySet()) {
-      String key = entry.getKey();
-      String[] values = entry.getValue();
+      JSONObject responseJson = new JSONObject();
+      if (results.isEmpty()) {
+        responseJson.put("success", false);
+        responseJson.put("error", true);
+        responseJson.put("message", "Terminal not found");
+        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+      } else {
+        Map rowMap = (Map) results.get(0);
+        String terminalId = getTerminalId((Map<String, Object>) rowMap);
+        String organizationId = getOrganizationId((Map<String, Object>) rowMap);
+        String currencyId = getCurrencyId((Map<String, Object>) rowMap);
 
-      if (values.length == 1) {
-        jsonParams.put(key, values[0]);
-      } else if (values.length > 1) {
-        JSONArray jsonArray = new JSONArray();
-        for (String value : values) {
-          jsonArray.put(value);
+        JSONObject terminalJson = terminalModel.buildTerminalJson(rowMap);
+
+        terminalJson.put("payments", terminalModel.getPayments(terminalId));
+        // terminalJson.put("currencyPanel", terminalModel.getCurrencyPanel(terminalId));
+        terminalJson.put("cashMgmtDepositEvents",
+            terminalModel.getCashMgmtDepositEvents(terminalId));
+        terminalJson.put("cashMgmtDropEvents", terminalModel.getCashMgmtDropEvents(terminalId));
+
+        if (organizationId != null) {
+          // terminalJson.put("priceLists", terminalModel.getPriceLists(organizationId));
         }
-        jsonParams.put(key, jsonArray);
-      }
-    }
+        if (organizationId != null && currencyId != null) {
+          // terminalJson.put("rates", terminalModel.getExchangeRates(organizationId, currencyId));
+        }
 
-    return jsonParams;
+        responseJson.put("terminal", terminalJson);
+        responseJson.put("success", true);
+      }
+
+      response.getWriter().write(responseJson.toString());
+
+      long elapsed = System.currentTimeMillis() - startTime;
+      log.debug("GetTerminal completed in {}ms", elapsed);
+
+    } catch (Throwable t) {
+      Throwable cause = DbUtility.getUnderlyingSQLException(t);
+      log.error("Error in GetTerminal WebService", cause);
+      sendErrorResponse(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+          "Error executing query: " + cause.getMessage());
+    }
+  }
+
+  private String getTerminalId(Map<String, Object> rowMap) {
+    Object id = rowMap.get("id");
+    return id != null ? id.toString() : null;
+  }
+
+  private String getOrganizationId(Map<String, Object> rowMap) {
+    Object id = rowMap.get("organization");
+    return id != null ? id.toString() : null;
+  }
+
+  private String getCurrencyId(Map<String, Object> rowMap) {
+    Object id = rowMap.get("currency");
+    return id != null ? id.toString() : null;
+  }
+
+  private void sendErrorResponse(HttpServletResponse response, int statusCode, String message) {
+    response.setStatus(statusCode);
+    try {
+      JSONObject errorJson = new JSONObject();
+      errorJson.put("success", false);
+      errorJson.put("error", true);
+      errorJson.put("message", message);
+      errorJson.put("statusCode", statusCode);
+      response.getWriter().write(errorJson.toString());
+    } catch (Exception e) {
+      log.error("Error sending error response", e);
+    }
   }
 
   @Override
   public void doPost(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
-    // TODO Auto-generated method stub
-
+    sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
+        "POST method not supported. Use GET instead.");
   }
 
   @Override
   public void doDelete(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
-    // TODO Auto-generated method stub
-
+    sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
+        "DELETE method not supported. Use GET instead.");
   }
 
   @Override
   public void doPut(String path, HttpServletRequest request, HttpServletResponse response)
       throws Exception {
-    // TODO Auto-generated method stub
-
+    sendErrorResponse(response, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
+        "PUT method not supported. Use GET instead.");
   }
-
 }
