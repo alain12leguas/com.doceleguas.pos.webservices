@@ -18,7 +18,6 @@ import org.hibernate.ScrollMode;
 import org.hibernate.ScrollableResults;
 import org.hibernate.query.NativeQuery;
 import org.openbravo.base.weld.WeldUtils;
-import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.dal.service.OBQuery;
 import org.openbravo.mobile.core.master.MasterDataProcessHQLQuery;
@@ -51,10 +50,10 @@ public class MasterDataWebService implements WebService {
       Role defaultPosRole = currentUser.getOBPOSDefaultPOSRole();
       // User currentUser = OBDal.getInstance().get(User.class, jsonsent.getString("user"));
 
-      OBContext.setOBContext(currentUser.getId(), defaultPosRole.getId(),
-          jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
-          jsonsent.optString("organization",
-              OBContext.getOBContext().getCurrentOrganization().getId()));
+      // OBContext.setOBContext(currentUser.getId(), defaultPosRole.getId(),
+      // jsonsent.optString("client", OBContext.getOBContext().getCurrentClient().getId()),
+      // jsonsent.optString("organization",
+      // OBContext.getOBContext().getCurrentOrganization().getId()));
       response.setContentType("application/json");
       response.setCharacterEncoding("UTF-8");
       JSONObject responseJSON = new JSONObject();

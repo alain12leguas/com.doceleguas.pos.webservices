@@ -84,6 +84,7 @@ public class LoadTerminal implements WebService {
         responseJson.put("message", "Terminal not found");
         response.setStatus(HttpServletResponse.SC_NOT_FOUND);
       } else {
+        int a = 0;
         Map rowMap = (Map) results.get(0);
         String terminalId = getTerminalId((Map<String, Object>) rowMap);
         String organizationId = getOrganizationId((Map<String, Object>) rowMap);
@@ -92,18 +93,14 @@ public class LoadTerminal implements WebService {
         JSONObject terminalJson = terminalModel.buildTerminalJson(rowMap);
 
         terminalJson.put("payments", terminalModel.getPayments(terminalId));
-        // terminalJson.put("currencyPanel", terminalModel.getCurrencyPanel(terminalId));
+        terminalJson.put("currencyPanel", terminalModel.getCurrencyPanel());
         terminalJson.put("cashMgmtDepositEvents",
             terminalModel.getCashMgmtDepositEvents(terminalId));
         terminalJson.put("cashMgmtDropEvents", terminalModel.getCashMgmtDropEvents(terminalId));
-
-        if (organizationId != null) {
-          // terminalJson.put("priceLists", terminalModel.getPriceLists(organizationId));
-        }
-        if (organizationId != null && currencyId != null) {
-          // terminalJson.put("rates", terminalModel.getExchangeRates(organizationId, currencyId));
-        }
-
+        terminalJson.put("priceLists", terminalModel.getPriceLists(organizationId));
+        terminalJson.put("hardwareURL", terminalModel.getHardwareUrl(terminalId));
+        terminalJson.put("deliveryModes", terminalModel.getDeliveryModes());
+        terminalJson.put("rates", terminalModel.getExchangeRates());
         responseJson.put("terminal", terminalJson);
         responseJson.put("success", true);
       }

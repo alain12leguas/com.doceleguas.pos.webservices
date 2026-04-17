@@ -185,7 +185,6 @@ public class TerminalModel {
       terminal.put("organizationTaxId", getStringValue(rowMap.get("organizationTaxId")));
       terminal.put("organizationAddressIdentifier",
           getStringValue(rowMap.get("organizationAddressIdentifier")));
-      terminal.put("hardwareurl", getStringValue(rowMap.get("hardwareurl")));
       terminal.put("priceIncludesTax", getBooleanValue(rowMap.get("priceIncludesTax")));
 
       // terminal.terminal
@@ -200,10 +199,21 @@ public class TerminalModel {
       innerTerminal.put("organization$_identifier", getStringValue(rowMap.get("organizationName")));
       innerTerminal.put("businessPartner", getStringValue(rowMap.get("businessPartner")));
       innerTerminal.put("allowpayoncredit", getBooleanValue(rowMap.get("allowpayoncredit")));
-      Object sessionTimeout = rowMap.get("sessionTimeout");
-      innerTerminal.put("sessionTimeout",
-          sessionTimeout instanceof Number ? ((Number) sessionTimeout).intValue() : 0);
+      innerTerminal.put("sessionTimeout", getIntValue(rowMap.get("sessionTimeout")));
       innerTerminal.put("hardwareurl", getStringValue(rowMap.get("hardwareurl")));
+      innerTerminal.put("lastDocumentNumber", getIntValue(rowMap.get("lastDocumentNumber")));
+      innerTerminal.put("lastQuotationDocumentNumber",
+          getIntValue(rowMap.get("lastQuotationDocumentNumber")));
+      innerTerminal.put("lastReturnDocumentNumber",
+          getIntValue(rowMap.get("lastReturnDocumentNumber")));
+      innerTerminal.put("lastFullInvoiceDocumentNumber",
+          getIntValue(rowMap.get("lastFullInvoiceDocumentNumber")));
+      innerTerminal.put("lastSimplifiedReturnInvoiceDocumentNumber",
+          getIntValue(rowMap.get("lastSimplifiedReturnInvoiceDocumentNumber")));
+      innerTerminal.put("lastSimplifiedInvoiceDocumentNumber",
+          getIntValue(rowMap.get("lastSimplifiedInvoiceDocumentNumber")));
+      innerTerminal.put("lastFullReturnInvoiceDocumentNumber",
+          getIntValue(rowMap.get("lastFullReturnInvoiceDocumentNumber")));
       terminal.put("terminal", innerTerminal);
 
       // terminal.currency
@@ -245,21 +255,21 @@ public class TerminalModel {
     JSONArray payments = new JSONArray();
 
 //@formatter:off
-    String sql = "SELECT p.OBPOS_APP_PAYMENT_ID AS \"id\", "            // 0
-        + "p.VALUE AS \"paymentValue\", "                                          // 2
-        + "p.ISACTIVE AS \"isActive\", "                                       // 3
-        + "p.name AS \"commercialName\", "                                 // 4
-        + "p.ALLOWVARIABLEAMOUNT AS \"allowVariableAmount\", "                            // 5
-        + "COALESCE(fin_curr.ISO_CODE, pmt_curr.ISO_CODE, org_curr.ISO_CODE) AS \"isoCode\", "                                    // 6
-        + "COALESCE(fin_curr.CURSYMBOL, pmt_curr.CURSYMBOL, org_curr.CURSYMBOL) AS \"symbol\", "                                // 7
-        + "COALESCE(fin_curr.Issymbolrightside, pmt_curr.Issymbolrightside, org_curr.Issymbolrightside) AS \"currencySymbolAtTheRight\", "                        // 8
-        + "COALESCE(f.CURRENTBALANCE, 0) AS \"currentBalance\", "                                 // 9
-        + "COALESCE(pmt.ISCASH, 'N') AS \"iscash\", "                        // 10  iscash
-        + "pmt.C_CURRENCY_ID AS \"currency\", "                                // 11  paymentMethod.currency
-        + "COALESCE(pmt.ALLOWOVERPAYMENT, 'N') AS \"allowOverPayment\", "              // 12
-        + "pmt.OBPOS_APP_PAYMENT_TYPE_ID AS \"paymentMethod\", "                    // 13  paymentMethod.paymentMethod
-        + "OBPOS_CURRENCY_RATE(COALESCE(fin_curr.C_CURRENCY_ID, pmt_curr.C_CURRENCY_ID, org_curr.C_CURRENCY_ID), org_curr.C_CURRENCY_ID, null, null, app.AD_CLIENT_ID, app.AD_ORG_ID) AS \"rate\", " // 14 rate
-        + "app_org.NAME AS \"organization$_identifier\" "                                      // 15  payment.organization$_identifier
+    String sql = "SELECT p.OBPOS_APP_PAYMENT_ID AS \"id\", "
+        + "p.VALUE AS \"paymentValue\", "
+        + "p.ISACTIVE AS \"isActive\", "
+        + "p.name AS \"commercialName\", "
+        + "p.ALLOWVARIABLEAMOUNT AS \"allowVariableAmount\", "
+        + "COALESCE(fin_curr.ISO_CODE, pmt_curr.ISO_CODE, org_curr.ISO_CODE) AS \"isoCode\", "
+        + "COALESCE(fin_curr.CURSYMBOL, pmt_curr.CURSYMBOL, org_curr.CURSYMBOL) AS \"symbol\", "
+        + "COALESCE(fin_curr.Issymbolrightside, pmt_curr.Issymbolrightside, org_curr.Issymbolrightside) AS \"currencySymbolAtTheRight\", "
+        + "COALESCE(f.CURRENTBALANCE, 0) AS \"currentBalance\", "
+        + "COALESCE(pmt.ISCASH, 'N') AS \"iscash\", "
+        + "pmt.C_CURRENCY_ID AS \"currency\", "
+        + "COALESCE(pmt.ALLOWOVERPAYMENT, 'N') AS \"allowOverPayment\", "
+        + "pmt.OBPOS_APP_PAYMENT_TYPE_ID AS \"paymentMethod\", "
+        + "OBPOS_CURRENCY_RATE(COALESCE(fin_curr.C_CURRENCY_ID, pmt_curr.C_CURRENCY_ID, org_curr.C_CURRENCY_ID), org_curr.C_CURRENCY_ID, null, null, app.AD_CLIENT_ID, app.AD_ORG_ID) AS \"rate\", "
+        + "app_org.NAME AS \"organization$_identifier\" "
         + "FROM OBPOS_APP_PAYMENT p "
         + "LEFT JOIN OBPOS_APP_PAYMENT_TYPE pmt ON pmt.OBPOS_APP_PAYMENT_TYPE_ID = p.OBPOS_APP_PAYMENT_TYPE_ID "
         + "LEFT JOIN FIN_FINANCIAL_ACCOUNT f ON f.FIN_FINANCIAL_ACCOUNT_ID = p.FIN_Financial_Account_ID "
@@ -333,22 +343,14 @@ public class TerminalModel {
     JSONArray priceLists = new JSONArray();
 //@formatter:off
     String sql = "SELECT pl.M_PRICELIST_ID AS \"id\", " 
-        + "pl.NAME AS \"name\", "
-        + "pl.DESCRIPTION AS \"description\", " 
-        + "pl.PRICEINCLUDESTAX AS \"priceIncludesTax\", "
-        + "pl.ISDEFAULT AS \"isDefault\", " 
-        + "pl.ISACTIVE AS \"isActive\", "
-        + "pl.SALESPRICELIST AS \"salesPriceList\", " 
+        + "pl.NAME AS \"name\", "         
         + "curr.C_CURRENCY_ID AS \"currency\", "
-        + "curr.NAME AS \"currency$_identifier\", "
-        + "curr.ISO_CODE AS \"iSOCode\", "
-        + "curr.C_CURRSYMBOL AS \"symbol\" " 
+        + "curr.ISO_CODE AS \"currency$_identifier\" "
         + "FROM M_PRICELIST pl "
         + "LEFT JOIN C_CURRENCY curr ON curr.C_CURRENCY_ID = pl.C_CURRENCY_ID "
-        + "WHERE pl.AD_ORG_ID IN (0, :organizationId) " 
-        + "AND pl.ISACTIVE = 'Y' "
-        + "AND pl.SALESPRICELIST = 'Y' " 
-        + "ORDER BY pl.ISDEFAULT DESC, pl.NAME";
+        + "WHERE pl.ISACTIVE = 'Y' "
+        + "AND pl.IsSOPriceList = 'Y' " 
+        + "ORDER BY pl.NAME";
   //@formatter:on
     @SuppressWarnings("unchecked")
     NativeQuery<Map<String, Object>> query = OBDal.getInstance()
@@ -381,48 +383,42 @@ public class TerminalModel {
     return priceLists;
   }
 
-  // public JSONArray getCurrencyPanel(String terminalId) {
-  // JSONArray denominations = new JSONArray();
-  //
-  // String sql = "SELECT cd.OBPOS_CURRENCYDENOMINATION_ID AS \"id\", "
-  // + "cd.COINBILL AS \"coinBill\", " + "cd.AMOUNT AS \"amount\", "
-  // + "cd.ISACTIVE AS \"isActive\", " + "cd.ISSHOW AS \"isShow\", "
-  // + "(SELECT curr_c.C_CURRENCY_ID FROM C_CURRENCY curr_c "
-  // + " JOIN M_PRICELIST pl_c ON pl_c.C_CURRENCY_ID = curr_c.C_CURRENCY_ID "
-  // + " JOIN OBPOS_APPLICATIONS t_c ON t_c.M_PRICELIST_ID = pl_c.M_PRICELIST_ID "
-  // + " WHERE t_c.OBPOS_APPLICATIONS_ID = :terminalId LIMIT 1) AS \"currency\" "
-  // + "FROM OBPOS_CURRENCYPANEL cp "
-  // + "JOIN OBPOS_CURRENCYDENOMINATION cd ON cd.OBPOS_CURRENCYPANEL = cp.OBPOS_CURRENCYPANEL_ID "
-  // + "WHERE cp.AD_ORG_ID IN (SELECT AD_ORG_ID FROM OBPOS_APPLICATIONS WHERE OBPOS_APPLICATIONS_ID
-  // = :terminalId) "
-  // + "AND cd.ISACTIVE = 'Y' " + "ORDER BY cd.COINBILL DESC, cd.AMOUNT DESC";
-  //
-  // @SuppressWarnings("unchecked")
-  // NativeQuery<Map<String, Object>> query = OBDal.getInstance()
-  // .getSession()
-  // .createNativeQuery(sql);
-  // query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
-  // query.setParameter("terminalId", terminalId);
-  //
-  // List<Map<String, Object>> results = query.getResultList();
-  //
-  // for (Map<String, Object> row : results) {
-  // JSONObject denom = new JSONObject();
-  // try {
-  // denom.put("id", getStringValue(row.get("id")));
-  // denom.put("coinBill", getStringValue(row.get("coinBill")));
-  // denom.put("amount", getStringValue(row.get("amount")));
-  // denom.put("isActive", getBooleanValue(row.get("isActive")));
-  // denom.put("isShow", getBooleanValue(row.get("isShow")));
-  // denom.put("currency", getStringValue(row.get("currency")));
-  // } catch (JSONException e) {
-  // log.error("Error building denomination JSON", e);
-  // }
-  // denominations.put(denom);
-  // }
-  //
-  // return denominations;
-  // }
+  public JSONArray getCurrencyPanel() {
+    JSONArray result = new JSONArray();
+
+    String sql = "SELECT e.LINE AS \"lineNo\", "
+        + "e.C_CURRENCY_ID AS \"currency\", "
+        + "e.BACKCOLOR AS \"backcolor\", "
+        + "e.BORDERCOLOR AS \"bordercolor\", "
+        + "e.AMOUNT AS \"amount\" "
+        + "FROM OBPOS_CURRENCY_PANEL e "
+        + "WHERE e.ISACTIVE = 'Y' "
+        + "ORDER BY e.LINE ASC";
+
+    @SuppressWarnings("unchecked")
+    NativeQuery<Map<String, Object>> query = OBDal.getInstance()
+        .getSession()
+        .createNativeQuery(sql);
+    query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
+
+    List<Map<String, Object>> results = query.getResultList();
+
+    for (Map<String, Object> row : results) {
+      JSONObject entry = new JSONObject();
+      try {
+        entry.put("lineNo", getIntValue(row.get("lineNo")));
+        entry.put("currency", getStringValue(row.get("currency")));
+        entry.put("backcolor", getStringValue(row.get("backcolor")));
+        entry.put("bordercolor", getStringValue(row.get("bordercolor")));
+        entry.put("amount", getStringValue(row.get("amount")));
+      } catch (JSONException e) {
+        log.error("Error building currencyPanel JSON", e);
+      }
+      result.put(entry);
+    }
+
+    return result;
+  }
 
   public JSONArray getCashMgmtDepositEvents(String terminalId) {
     OBPOSApplications pOSTerminal = getTerminal(terminalId);
@@ -520,41 +516,44 @@ public class TerminalModel {
     return events;
   }
 
-  public JSONArray getExchangeRates(String organizationId, String currencyId) {
+  public JSONArray getExchangeRates() {
     JSONArray rates = new JSONArray();
 
-    String sql = "SELECT r.C_CONVERSION_RATE_ID AS \"id\", "
-        + "r.C_CURRENCY_ID AS \"toCurrencyId\", " //
-        + "curr.ISO_CODE AS \"toCurrencyISOCode\", " //
-        + "curr.C_CURRSYMBOL AS \"toCurrencySymbol\", " //
-        + "r.RATE AS \"rate\", " + "r.VALIDFROM AS \"validFrom\" " //
+    String sql = "SELECT curr.ISO_CODE AS \"isoCode\", "
+        + "curr.CURSYMBOL AS \"currSymbol\", "
+        + "r.C_CURRENCY_ID AS \"currId\", "
+        + "tocurr.ISO_CODE AS \"toIsoCode\", "
+        + "tocurr.CURSYMBOL AS \"toCurrSymbol\", "
+        + "r.C_CURRENCY_ID_TO AS \"toCurrId\", "
+        + "r.VALIDFROM AS \"validFrom\", "
+        + "r.VALIDTO AS \"validTo\", "
+        + "r.MULTIPLYRATE AS \"multRate\" "
         + "FROM C_CONVERSION_RATE r "
         + "JOIN C_CURRENCY curr ON curr.C_CURRENCY_ID = r.C_CURRENCY_ID "
-        + "WHERE r.AD_ORG_ID IN (0, :organizationId) " //
-        + "AND r.C_CURRENCY_TO_ID = :currencyId " //
-        + "AND r.ISACTIVE = 'Y' " //
-        + "AND r.VALIDFROM <= CURRENT_DATE " //
-        + "ORDER BY r.VALIDFROM DESC";
+        + "JOIN C_CURRENCY tocurr ON tocurr.C_CURRENCY_ID = r.C_CURRENCY_ID_TO "
+        + "WHERE r.VALIDFROM <= CURRENT_DATE "
+        + "AND r.VALIDTO >= CURRENT_DATE";
 
     @SuppressWarnings("unchecked")
     NativeQuery<Map<String, Object>> query = OBDal.getInstance()
         .getSession()
         .createNativeQuery(sql);
     query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
-    query.setParameter("organizationId", organizationId);
-    query.setParameter("currencyId", currencyId);
 
     List<Map<String, Object>> results = query.getResultList();
 
     for (Map<String, Object> row : results) {
       JSONObject rate = new JSONObject();
       try {
-        rate.put("id", getStringValue(row.get("id")));
-        rate.put("toCurrencyId", getStringValue(row.get("toCurrencyId")));
-        rate.put("toCurrencyISOCode", getStringValue(row.get("toCurrencyISOCode")));
-        rate.put("toCurrencySymbol", getStringValue(row.get("toCurrencySymbol")));
-        rate.put("rate", getStringValue(row.get("rate")));
+        rate.put("isoCode", getStringValue(row.get("isoCode")));
+        rate.put("currSymbol", getStringValue(row.get("currSymbol")));
+        rate.put("currId", getStringValue(row.get("currId")));
+        rate.put("toIsoCode", getStringValue(row.get("toIsoCode")));
+        rate.put("toCurrSymbol", getStringValue(row.get("toCurrSymbol")));
+        rate.put("toCurrId", getStringValue(row.get("toCurrId")));
         rate.put("validFrom", getStringValue(row.get("validFrom")));
+        rate.put("validTo", getStringValue(row.get("validTo")));
+        rate.put("multRate", getStringValue(row.get("multRate")));
       } catch (JSONException e) {
         log.error("Error building rate JSON", e);
       }
@@ -564,13 +563,90 @@ public class TerminalModel {
     return rates;
   }
 
+  public JSONArray getHardwareUrl(String terminalId) {
+    JSONArray result = new JSONArray();
+    OBPOSApplications terminal = getTerminal(terminalId);
+
+    String sql = "SELECT p.OBPOS_HARDWAREURL_ID AS \"id\", " + "hwm.NAME AS \"_identifier\", "
+        + "hwm.HARDWAREURL AS \"hardwareURL\", " + "hwm.ISRECEIPTPRINTER AS \"hasReceiptPrinter\", "
+        + "hwm.ISPDFPRINTER AS \"hasPDFPrinter\", " + "hwm.BARCODE AS \"barcode\" "
+        + "FROM OBPOS_HARDWAREURL p "
+        + "JOIN OBPOS_HARDWAREMNG hwm ON hwm.OBPOS_HARDWAREMNG_ID = p.OBPOS_HARDWAREMNG_ID "
+        + "WHERE p.OBPOS_TERMINALTYPE_ID = :terminalTypeId " + "AND p.ISACTIVE = 'Y' "
+        + "ORDER BY hwm.NAME";
+
+    @SuppressWarnings("unchecked")
+    NativeQuery<Map<String, Object>> query = OBDal.getInstance()
+        .getSession()
+        .createNativeQuery(sql);
+    query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
+    query.setParameter("terminalTypeId", terminal.getObposTerminaltype().getId());
+
+    List<Map<String, Object>> results = query.getResultList();
+
+    for (Map<String, Object> row : results) {
+      JSONObject entry = new JSONObject();
+      try {
+        entry.put("id", getStringValue(row.get("id")));
+        entry.put("_identifier", getStringValue(row.get("_identifier")));
+        entry.put("hardwareURL", getStringValue(row.get("hardwareURL")));
+        entry.put("hasReceiptPrinter", getBooleanValue(row.get("hasReceiptPrinter")));
+        entry.put("hasPDFPrinter", getBooleanValue(row.get("hasPDFPrinter")));
+        entry.put("barcode", getStringValue(row.get("barcode")));
+      } catch (JSONException e) {
+        log.error("Error building hardwareUrl JSON", e);
+      }
+      result.put(entry);
+    }
+
+    return result;
+  }
+
+  public JSONArray getDeliveryModes() {
+    JSONArray result = new JSONArray();
+    String language = OBContext.getOBContext().getLanguage().getLanguage();
+
+    String sql = "SELECT list.VALUE AS \"id\", " + "COALESCE(trl.NAME, list.NAME) AS \"name\" "
+        + "FROM AD_REF_LIST list "
+        + "LEFT JOIN AD_REF_LIST_TRL trl ON trl.AD_REF_LIST_ID = list.AD_REF_LIST_ID "
+        + "  AND trl.AD_LANGUAGE = :language "
+        + "WHERE list.AD_REFERENCE_ID = '41D44C94D0AC41DEBA9A2BEB0EAF059C' "
+        + "AND list.ISACTIVE = 'Y' " + "ORDER BY list.SEQNO";
+
+    @SuppressWarnings("unchecked")
+    NativeQuery<Map<String, Object>> query = OBDal.getInstance()
+        .getSession()
+        .createNativeQuery(sql);
+    query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
+    query.setParameter("language", language);
+
+    List<Map<String, Object>> results = query.getResultList();
+
+    for (Map<String, Object> row : results) {
+      JSONObject entry = new JSONObject();
+      try {
+        entry.put("id", getStringValue(row.get("id")));
+        entry.put("name", getStringValue(row.get("name")));
+      } catch (JSONException e) {
+        log.error("Error building deliveryModes JSON", e);
+      }
+      result.put(entry);
+    }
+
+    return result;
+  }
+
   public JSONObject getCurrency(String currencyId) {
     JSONObject currency = new JSONObject();
 
-    String sql = "SELECT c.C_CURRENCY_ID AS \"id\", " + "c.ISO_CODE AS \"iSOCode\", "
-        + "c.C_CURRSYMBOL AS \"symbol\", " + "c.STDPRECISION AS \"standardPrecision\", "
-        + "c.PRICEPRICE AS \"pricePrecision\" " + "FROM C_CURRENCY c "
-        + "WHERE c.C_CURRENCY_ID = :currencyId " + "AND c.ISACTIVE = 'Y'";
+    String sql = "SELECT c.C_CURRENCY_ID AS \"id\", " //
+        + "c.ISO_CODE AS \"iSOCode\", " //
+        + "c.C_CURRSYMBOL AS \"symbol\", " //
+        + "c.STDPRECISION AS \"standardPrecision\", " //
+        + "c.PRICEPRICE AS \"pricePrecision\" " //
+        + "FROM C_CURRENCY c " //
+        + "WHERE c.C_CURRENCY_ID = :currencyId " //
+        + "AND c.ISACTIVE = 'Y'";
 
     @SuppressWarnings("unchecked")
     NativeQuery<Map<String, Object>> query = OBDal.getInstance()
@@ -598,7 +674,11 @@ public class TerminalModel {
   }
 
   private String getStringValue(Object value) {
-    return value != null ? value.toString() : null;
+    return value != null ? value.toString() : "";
+  }
+
+  private int getIntValue(Object value) {
+    return value instanceof Number ? ((Number) value).intValue() : 0;
   }
 
   private Boolean getBooleanValue(Object value) {
