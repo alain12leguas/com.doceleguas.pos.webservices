@@ -18,6 +18,20 @@ See: [OCOrder-import-type-database.md](OCOrder-import-type-database.md)
 
 HTTP `202` means queued only; final status is in `C_IMPORT_ENTRY`.
 
+## Native flow routing (no retail fallback)
+
+`OcreOrderLoadOrchestrator` now classifies each order payload and routes it through the native
+pipeline by flow type:
+
+- `STANDARD_SALE`
+- `RETURN` (including blind return)
+- `QUOTATION`
+- `LAYAWAY`
+- `OTHER` (best-effort create path with diagnostics)
+
+There is no runtime delegation to `ExternalOrderLoader`/`OrderLoader`. The objective is full
+functional coverage inside `com.doceleguas.pos.webservices`.
+
 ## Standard-sale parity outcome
 
 For accepted standard-sale payloads that pass native validation and persistence:

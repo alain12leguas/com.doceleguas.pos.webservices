@@ -98,11 +98,22 @@ from m_inout s
 where s.c_order_id in (select c_order_id from c_order where documentno = :documentNo);
 ```
 
-### Execution notes for the new modes
+### Execution notes for native routing
 
-- `-Ddoceleguas.ocorder.mode=retail`: baseline.
-- `-Ddoceleguas.ocorder.mode=shadow_native`: validates native payload shape, persists via retail.
-- `-Ddoceleguas.ocorder.mode=native`: tries `CoreOrderPersistenceAdapter`; if unsupported/fails, falls back to retail.
+- `-Ddoceleguas.ocorder.mode=shadow_native`: validates native payload shape before persistence.
+- `-Ddoceleguas.ocorder.mode=native`: executes native persistence for all classified flows.
+- There is no runtime fallback to retail loaders in the OCWS_Order chain.
+
+### Flow-specific assertions
+
+Run the checklist with one payload per flow:
+
+- `STANDARD_SALE`: `docstatus='CO'`, `processed='Y'`, payment plan fully settled.
+- `RETURN`/blind return: return document type, negative line quantities/amounts, payment out
+  consistency (`APP`/refund path), no residual outstanding for fully paid return.
+- `QUOTATION`: quotation doc type, no forced payment rows, expected draft/quotation lifecycle.
+- `LAYAWAY`: verify `step` handling is persisted best-effort and payment/outstanding consistency
+  for partial/full payments.
 
 ## 3. Automated client checks (OCRE-POS)
 

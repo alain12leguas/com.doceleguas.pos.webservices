@@ -61,7 +61,7 @@ public class OcreOrderLoadOrchestrator {
             prepared.optString("messageId", "<missing>"));
       }
 
-      ret = coreOrderPersistence.persistTransformedEnvelope(prepared);
+      ret = routeAndPersist(prepared);
     } catch (Exception e) {
       try {
         ret.put(JsonConstants.RESPONSE_STATUS, JsonConstants.RPCREQUEST_STATUS_FAILURE);
@@ -71,6 +71,47 @@ public class OcreOrderLoadOrchestrator {
         // ignore
       }
     }
+    return ret;
+  }
+
+  private JSONObject routeAndPersist(JSONObject prepared) throws Exception {
+    JSONArray data = prepared.optJSONArray("data");
+    JSONArray processedOrders = new JSONArray();
+    if (data == null || data.length() == 0) {
+      JSONObject empty = new JSONObject();
+      empty.put(JsonConstants.RESPONSE_STATUS, JsonConstants.RPCREQUEST_STATUS_SUCCESS);
+      empty.put("result", "0");
+      empty.put("orders", processedOrders);
+      empty.put("pipeline", "core");
+      return empty;
+    }
+
+    for (int i = 0; i < data.length(); i++) {
+      JSONObject order = data.getJSONObject(i);
+      OrderFlowType flow = OrderFlowUtils.classify(order);
+      log.info("[OCWS_Order] messageId={} flow={} step={} documentNo={}",
+          prepared.optString("messageId", "<missing>"), flow, OrderFlowUtils.resolveStep(order),
+          order.optString("documentNo", "<missing>"));
+      JSONObject singleEnvelope = OrderFlowUtils.wrapSingleEnvelope(prepared, order);
+      JSONObject result = coreOrderPersistence.persistTransformedEnvelope(singleEnvelope);
+      int status = result.optInt(JsonConstants.RESPONSE_STATUS, JsonConstants.RPCREQUEST_STATUS_SUCCESS);
+      if (status != JsonConstants.RPCREQUEST_STATUS_SUCCESS) {
+        return result;
+      }
+      JSONArray resultOrders = result.optJSONArray("orders");
+      if (resultOrders == null) {
+        continue;
+      }
+      for (int j = 0; j < resultOrders.length(); j++) {
+        processedOrders.put(resultOrders.getJSONObject(j));
+      }
+    }
+
+    JSONObject ret = new JSONObject();
+    ret.put(JsonConstants.RESPONSE_STATUS, JsonConstants.RPCREQUEST_STATUS_SUCCESS);
+    ret.put("result", "0");
+    ret.put("orders", processedOrders);
+    ret.put("pipeline", "core");
     return ret;
   }
 

@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import javax.enterprise.context.ApplicationScoped;
+import javax.inject.Inject;
 import javax.servlet.ServletException;
 
 import org.apache.commons.lang.StringUtils;
@@ -42,9 +43,7 @@ import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBCriteria;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.erpCommon.businessUtility.Tax;
-import org.openbravo.model.ad.process.ProcessInstance;
 import org.openbravo.model.ad.system.Client;
-import org.openbravo.model.ad.ui.Process;
 import org.openbravo.model.common.businesspartner.BusinessPartner;
 import org.openbravo.model.common.businesspartner.Location;
 import org.openbravo.model.common.currency.Currency;
@@ -62,28 +61,29 @@ import org.openbravo.model.financialmgmt.payment.FIN_PaymentSchedule;
 import org.openbravo.model.financialmgmt.payment.FIN_PaymentScheduleDetail;
 import org.openbravo.model.financialmgmt.payment.PaymentTerm;
 import org.openbravo.model.financialmgmt.tax.TaxRate;
+import org.openbravo.model.materialmgmt.transaction.ShipmentInOut;
 import org.openbravo.model.pricing.pricelist.PriceList;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.service.db.CallProcess;
 import org.openbravo.service.db.DalConnectionProvider;
 import org.openbravo.service.json.JsonConstants;
 
+import com.doceleguas.pos.webservices.orderload.OrderFlowType;
+import com.doceleguas.pos.webservices.orderload.OrderFlowUtils;
 import com.doceleguas.pos.webservices.orderload.spi.OrderPersistencePort;
 
 /**
  * First functional Core/DAL persistence adapter for OCOrder.
  *
- * Scope intentionally limited to standard sales: - order header - order lines - basic FIN_Payment
- * rows (non change/refund lines)
- *
- * Unsupported flows intentionally fail so orchestrator can fallback to retail pipeline.
+ * Native Core/DAL persistence adapter for OCWS_Order.
  */
 @ApplicationScoped
 public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
 
   private static final Logger log = LogManager.getLogger();
-  private static final String ORDER_POST_PROCESS_ID = "104";
   private final Map<String, ProductServiceConfig> serviceConfigCache = new HashMap<>();
+
+  @Inject
+  private OcreNativeStandardDocumentsService nativeStandardDocumentsService;
 
   @Override
   public JSONObject persistTransformedEnvelope(JSONObject transformedEnvelope) throws Exception {
@@ -98,7 +98,10 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     JSONArray processedOrders = new JSONArray();
     for (int i = 0; i < data.length(); i++) {
       JSONObject orderJson = data.getJSONObject(i);
-      ensureSupportedStandardSale(orderJson);
+      ensureSupportedOrderFlow(orderJson);
+      OrderFlowType flow = OrderFlowUtils.classify(orderJson);
+      log.info("[OCOrder][core] processing documentNo={} flow={} step={}",
+          orderJson.optString("documentNo", "<missing>"), flow, OrderFlowUtils.resolveStep(orderJson));
 
       OrderCreationResult orderResult = createOrReuseOrder(orderJson, terminalContext);
       Order order = orderResult.order;
@@ -109,8 +112,20 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       }
 
       createOrderLines(orderJson, order, terminalContext);
-      completeOrder(order);
-      createBasicPayments(orderJson, order, terminalContext);
+      if (shouldCompleteOrder(orderJson)) {
+        completeOrder(order, orderJson);
+      }
+      if (shouldCreateStandardPosDocuments(orderJson)) {
+        nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
+        nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
+        ShipmentInOut shipment = nativeStandardDocumentsService.createShipmentIfRequested(order,
+            orderJson);
+        nativeStandardDocumentsService.createInvoiceIfRequested(order, orderJson, shipment);
+        OBDal.getInstance().refresh(order);
+      }
+      if (shouldCreatePayments(orderJson)) {
+        createBasicPayments(orderJson, order, terminalContext);
+      }
       OBDal.getInstance().flush();
 
       processedOrders.put(successOrderJson(order, false));
@@ -133,16 +148,13 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     return json;
   }
 
-  private void ensureSupportedStandardSale(JSONObject orderJson) throws Exception {
-    if (orderJson.optBoolean("isReturn", false) || orderJson.optBoolean("isQuotation", false)
-        || orderJson.optBoolean("isLayaway", false) || orderJson.optBoolean("payOnCredit", false)
-        || orderJson.optBoolean("isNewLayaway", false)) {
-      throw new OBException("Core adapter supports only standard sale flow for now");
-    }
-
-    String step = orderJson.optString("step", "create");
-    if (!StringUtils.isEmpty(step) && !"create".equalsIgnoreCase(step)) {
-      throw new OBException("Unsupported step for Core adapter: " + step);
+  private void ensureSupportedOrderFlow(JSONObject orderJson) throws Exception {
+    String step = OrderFlowUtils.resolveStep(orderJson);
+    if (!"create".equalsIgnoreCase(step) && !"all".equalsIgnoreCase(step)
+        && !"pay".equalsIgnoreCase(step) && !"ship".equalsIgnoreCase(step)
+        && !"cancel".equalsIgnoreCase(step) && !"cancel_replace".equalsIgnoreCase(step)) {
+      log.warn("[OCOrder][core] unsupported step '{}' for document {}. Using best-effort create.",
+          step, orderJson.optString("documentNo", "<missing>"));
     }
 
     validateRequiredOrderFields(orderJson);
@@ -166,10 +178,10 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     PaymentTerm paymentTerm = resolvePaymentTerm(bp);
     FIN_PaymentMethod orderPaymentMethod = resolveOrderPaymentMethod(orderJson, ctx, currency);
 
-    DocumentType documentType = FIN_Utility.getDocumentType(ctx.organization, "SOO");
+    DocumentType documentType = resolveOrderDocumentType(orderJson, ctx.organization);
     if (documentType == null) {
       throw new OBException(
-          "No SOO document type found for org " + ctx.organization.getIdentifier());
+          "No order document type found for org " + ctx.organization.getIdentifier());
     }
 
     Order order = OBProvider.getInstance().get(Order.class);
@@ -188,8 +200,9 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     order.setPriceList(priceList);
     order.setCurrency(currency);
     order.setSalesTransaction(true);
-    order.setSummedLineAmount(asBigDecimal(orderJson, "netAmount", BigDecimal.ZERO));
-    order.setGrandTotalAmount(asBigDecimal(orderJson, "grossAmount", BigDecimal.ZERO));
+    // Zero until lines persist: DB trigger adds line gross to GrandTotal (no pre-fill from JSON).
+    order.setSummedLineAmount(BigDecimal.ZERO);
+    order.setGrandTotalAmount(BigDecimal.ZERO);
     order.setPaymentTerms(paymentTerm);
     if (orderPaymentMethod != null) {
       order.setPaymentMethod(orderPaymentMethod);
@@ -200,6 +213,19 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     return new OrderCreationResult(order, false);
   }
 
+  private DocumentType resolveOrderDocumentType(JSONObject orderJson, Organization organization) {
+    if (orderJson.optBoolean("isQuotation", false) && organization.getObposCDoctypequot() != null) {
+      return organization.getObposCDoctypequot();
+    }
+    if (OrderFlowUtils.isReturnFlow(orderJson) && organization.getObposCDoctyperet() != null) {
+      return organization.getObposCDoctyperet();
+    }
+    if (organization.getObposCDoctype() != null) {
+      return organization.getObposCDoctype();
+    }
+    return FIN_Utility.getDocumentType(organization, "SOO");
+  }
+
   private void createOrderLines(JSONObject orderJson, Order order, TerminalContext ctx)
       throws Exception {
     JSONArray lines = orderJson.optJSONArray("lines");
@@ -208,6 +234,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     }
 
     BigDecimal sumNet = BigDecimal.ZERO;
+    BigDecimal sumGross = BigDecimal.ZERO;
     List<PersistedOrderLine> persistedLines = new ArrayList<>();
     for (int i = 0; i < lines.length(); i++) {
       JSONObject lineJson = lines.getJSONObject(i);
@@ -259,14 +286,23 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       OBDal.getInstance().save(line);
       persistedLines.add(new PersistedOrderLine(line, product, lineJson, payloadLineId));
       sumNet = sumNet.add(lineNet);
+      sumGross = sumGross.add(lineGross);
     }
 
     createServiceRelationsForLinkedProducts(order, persistedLines);
 
-    order.setSummedLineAmount(sumNet);
-    BigDecimal gross = asBigDecimal(orderJson, "grossAmount", sumNet);
-    order.setGrandTotalAmount(gross);
-    OBDal.getInstance().save(order);
+    BigDecimal payloadGross = asBigDecimal(orderJson, "grossAmount", null);
+    BigDecimal payloadNet = asBigDecimal(orderJson, "netAmount", null);
+    if (payloadNet != null && payloadNet.compareTo(sumNet) != 0) {
+      log.warn("[OCOrder][core] net mismatch for order {}. payloadNet={}, linesNet={}.",
+          order.getDocumentNo(), payloadNet, sumNet);
+    }
+    if (payloadGross != null && payloadGross.compareTo(sumGross) != 0) {
+      log.warn(
+          "[OCOrder][core] gross mismatch for order {}. payloadGross={}, linesGross={}.",
+          order.getDocumentNo(), payloadGross, sumGross);
+    }
+    // Do not force header totals here; native order processing will derive them from persisted lines.
   }
 
   private void createServiceRelationsForLinkedProducts(Order order,
@@ -450,10 +486,11 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         continue;
       }
 
-      BigDecimal amount = resolvePaymentAmount(paymentJson);
-      if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+      BigDecimal signedAmount = resolvePaymentAmount(paymentJson);
+      if (signedAmount.compareTo(BigDecimal.ZERO) == 0) {
         continue;
       }
+      BigDecimal amount = signedAmount.abs();
 
       PaymentResolution paymentResolution = resolvePaymentMethodAndAccount(paymentJson, ctx,
           order.getCurrency().getId());
@@ -464,7 +501,12 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         continue;
       }
 
-      DocumentType paymentDocType = FIN_Utility.getDocumentType(order.getOrganization(), "ARR");
+      boolean isReceipt = signedAmount.signum() >= 0;
+      DocumentType paymentDocType = FIN_Utility.getDocumentType(order.getOrganization(),
+          isReceipt ? "ARR" : "APP");
+      if (paymentDocType == null) {
+        paymentDocType = FIN_Utility.getDocumentType(order.getOrganization(), "ARR");
+      }
       String paymentDocNo = order.getDocumentNo();
       if (paymentCount > 0) {
         paymentDocNo = paymentDocNo + "-" + paymentCount;
@@ -483,9 +525,13 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       List<FIN_PaymentScheduleDetail> selectedPSD = new ArrayList<>();
       selectedPSD.add(psd);
       HashMap<String, BigDecimal> selectedPSDAmounts = new HashMap<>();
-      selectedPSDAmounts.put(psd.getId(), amount);
+      BigDecimal psdAllocation = amount;
+      if (psd.getAmount() != null && psd.getAmount().signum() < 0) {
+        psdAllocation = amount.negate();
+      }
+      selectedPSDAmounts.put(psd.getId(), psdAllocation);
 
-      FIN_Payment payment = FIN_AddPayment.savePayment(null, true, paymentDocType, paymentDocNo,
+      FIN_Payment payment = FIN_AddPayment.savePayment(null, isReceipt, paymentDocType, paymentDocNo,
           order.getBusinessPartner(), paymentResolution.paymentMethod,
           paymentResolution.financialAccount, amount.toPlainString(), paymentDate,
           order.getOrganization(), null, selectedPSD, selectedPSDAmounts, false, false,
@@ -509,10 +555,10 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     if (psdList != null) {
       for (FIN_PaymentScheduleDetail psd : psdList) {
         if (psd == null || psd.getPaymentDetails() != null || psd.getAmount() == null
-            || psd.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            || psd.getAmount().abs().compareTo(BigDecimal.ZERO) <= 0) {
           continue;
         }
-        if (psd.getAmount().compareTo(paymentAmount) == 0) {
+        if (psd.getAmount().abs().compareTo(paymentAmount.abs()) == 0) {
           return psd;
         }
         if (firstOutstanding == null) {
@@ -523,7 +569,11 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     if (firstOutstanding != null) {
       return firstOutstanding;
     }
-    return FIN_AddPayment.createPSD(paymentAmount, paymentSchedule, null, order.getOrganization(),
+    BigDecimal psdAmount = paymentAmount;
+    if (paymentSchedule.getAmount() != null && paymentSchedule.getAmount().signum() < 0) {
+      psdAmount = paymentAmount.negate();
+    }
+    return FIN_AddPayment.createPSD(psdAmount, paymentSchedule, null, order.getOrganization(),
         order.getBusinessPartner());
   }
 
@@ -613,24 +663,47 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     }
   }
 
-  private void completeOrder(Order order) {
-    Process process = OBDal.getInstance().get(Process.class, ORDER_POST_PROCESS_ID);
-    if (process == null) {
-      throw new OBException("Order post process not found. AD_Process_ID=" + ORDER_POST_PROCESS_ID);
+  private boolean shouldCompleteOrder(JSONObject orderJson) {
+    if (orderJson.has("completeTicket")) {
+      return orderJson.optBoolean("completeTicket", true);
     }
+    return true;
+  }
 
-    order.setDocumentAction("CO");
+  private boolean shouldCreatePayments(JSONObject orderJson) {
+    return OrderFlowUtils.classify(orderJson) != OrderFlowType.QUOTATION;
+  }
+
+  /**
+   * When true, create native shipment/invoice (Doceleguas) for closed standard sales — equivalent
+   * retail behavior without depending on OrderLoader utility classes.
+   */
+  private boolean shouldCreateStandardPosDocuments(JSONObject orderJson) {
+    if (OrderFlowUtils.classify(orderJson) != OrderFlowType.STANDARD_SALE) {
+      return false;
+    }
+    if (!orderJson.optBoolean("completeTicket", false)) {
+      return false;
+    }
+    return orderJson.optBoolean("generateShipment", false)
+        || orderJson.optBoolean("generateInvoice", false)
+        || orderJson.optBoolean("generateExternalInvoice", false)
+        || orderJson.has("calculatedInvoice");
+  }
+
+  private void completeOrder(Order order, JSONObject orderJson) {
+    OrderFlowType flow = OrderFlowUtils.classify(orderJson);
+    if (flow == OrderFlowType.QUOTATION) {
+      order.setDocumentStatus("UE");
+    } else {
+      order.setDocumentStatus("CO");
+    }
+    order.setDocumentAction("--");
+    order.setProcessed(true);
+    order.setProcessNow(false);
+    order.setDelivered(false);
     OBDal.getInstance().save(order);
     OBDal.getInstance().flush();
-
-    ProcessInstance pinstance = CallProcess.getInstance().call(process, order.getId(), null);
-    if (pinstance == null || pinstance.getResult() == null
-        || pinstance.getResult().longValue() == 0L) {
-      String error = pinstance != null ? pinstance.getErrorMsg() : "unknown process error";
-      Long result = pinstance != null ? pinstance.getResult() : null;
-      throw new OBException("Order completion failed for " + order.getDocumentNo() + ": result="
-          + result + ", error=" + error);
-    }
   }
 
   private PaymentResolution resolvePaymentMethodAndAccount(JSONObject paymentJson,
