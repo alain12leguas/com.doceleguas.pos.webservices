@@ -162,6 +162,22 @@ public class TerminalModel {
     select.append("t.HARDWAREURL AS \"hardwareurl\", ");
     select.append("t.PRINTERTYPE AS \"printertype\", ");
     select.append("tt.ALLOWPAYONCREDIT AS \"allowpayoncredit\", ");
+    select.append("o.EM_Obretco_Showtaxid AS \"bpShowtaxid\", ");
+    select.append("o.EM_Obretco_Showbpcategory AS \"bpShowbpcategory\", ");
+    select.append("t.ORDERDOCNO_PREFIX AS \"docNoPrefix\", ");
+    select.append("t.RETURNDOCNO_PREFIX AS \"returnDocNoPrefix\", ");
+    select.append("t.QUOTATIONDOCNO_PREFIX AS \"quotationDocNoPrefix\", ");
+    select.append("t.FULLINVDOCNO_PREFIX AS \"fullInvoiceDocNoPrefix\", ");
+    select.append("t.FULLRETINVDOCNO_PREFIX AS \"fullReturnInvoiceDocNoPrefix\", ");
+    select.append("t.SIMPINVDOCNO_PREFIX AS \"simplifiedInvoiceDocNoPrefix\", ");
+    select.append("t.SIMPRETINVDOCNO_PREFIX AS \"simplifiedReturnInvoiceDocNoPrefix\", ");
+    select.append("tt.ISMULTICHANGE AS \"multiChange\", ");
+    // select.append("o.EM_OBPOS_COUNTDIFFLIMIT AS \"organizationCountDiffLimit\", ");
+    select.append("t.DEFAULTWEBPOSTAB AS \"defaultwebpostab\", ");
+    select.append("tt.OBPOS_TERMINALTYPE_ID AS \"terminalType\", ");
+    select.append("t.PRINTOFFLINE AS \"printoffline\", ");
+    select.append("t.ISMASTER AS \"ismaster\", ");
+    select.append("t.DOCUMENTNO_PADDING AS \"documentnoPadding\", ");
     select.append("oi.ISCASHVAT AS \"cashVat\", ");
     select.append("o.EM_OBPOS_CURRENCY_FORMAT AS \"currencyFormat\", ");
     select.append("TRIM(CONCAT(COALESCE(loc.ADDRESS1, ''), "
@@ -207,6 +223,27 @@ public class TerminalModel {
           getIntValue(rowMap.get("lastSimplifiedInvoiceDocumentNumber")));
       innerTerminal.put("lastFullReturnInvoiceDocumentNumber",
           getIntValue(rowMap.get("lastFullReturnInvoiceDocumentNumber")));
+      innerTerminal.put("bp_showtaxid", getStringValue(rowMap.get("bpShowtaxid")));
+      innerTerminal.put("bp_showcategoryselector", getStringValue(rowMap.get("bpShowbpcategory")));
+      innerTerminal.put("docNoPrefix", getStringValue(rowMap.get("docNoPrefix")));
+      innerTerminal.put("returnDocNoPrefix", getStringValue(rowMap.get("returnDocNoPrefix")));
+      innerTerminal.put("quotationDocNoPrefix", getStringValue(rowMap.get("quotationDocNoPrefix")));
+      innerTerminal.put("fullInvoiceDocNoPrefix",
+          getStringValue(rowMap.get("fullInvoiceDocNoPrefix")));
+      innerTerminal.put("fullReturnInvoiceDocNoPrefix",
+          getStringValue(rowMap.get("fullReturnInvoiceDocNoPrefix")));
+      innerTerminal.put("simplifiedInvoiceDocNoPrefix",
+          getStringValue(rowMap.get("simplifiedInvoiceDocNoPrefix")));
+      innerTerminal.put("simplifiedReturnInvoiceDocNoPrefix",
+          getStringValue(rowMap.get("simplifiedReturnInvoiceDocNoPrefix")));
+      innerTerminal.put("multiChange", getBooleanValue(rowMap.get("multiChange")));
+      // innerTerminal.put("organizationCountDiffLimit",
+      // getStringValue(rowMap.get("organizationCountDiffLimit")));
+      innerTerminal.put("defaultwebpostab", getStringValue(rowMap.get("defaultwebpostab")));
+      innerTerminal.put("terminalType", getStringValue(rowMap.get("terminalType")));
+      innerTerminal.put("printoffline", getBooleanValue(rowMap.get("printoffline")));
+      innerTerminal.put("ismaster", getBooleanValue(rowMap.get("ismaster")));
+      innerTerminal.put("documentnoPadding", getStringValue(rowMap.get("documentnoPadding")));
       terminalJson.put("terminal", innerTerminal);
 
       // terminal.currency
@@ -248,27 +285,67 @@ public class TerminalModel {
     JSONArray payments = new JSONArray();
 
 //@formatter:off
-    String sql = "SELECT p.OBPOS_APP_PAYMENT_ID AS \"id\", "
-        + "p.VALUE AS \"paymentValue\", "
+    String sql = "SELECT "
+        // OBPOS_APP_PAYMENT fields
+        + "p.OBPOS_APP_PAYMENT_ID AS \"id\", "
+        + "p.VALUE AS \"searchKey\", "
+        + "p.NAME AS \"commercialName\", "
         + "p.ISACTIVE AS \"active\", "
-        + "p.name AS \"commercialName\", "
+        + "p.LINE AS \"line\", "
         + "p.ALLOWVARIABLEAMOUNT AS \"allowVariableAmount\", "
-        + "COALESCE(fin_curr.ISO_CODE, pmt_curr.ISO_CODE, org_curr.ISO_CODE) AS \"isoCode\", "
-        + "COALESCE(fin_curr.CURSYMBOL, pmt_curr.CURSYMBOL, org_curr.CURSYMBOL) AS \"symbol\", "
-        + "COALESCE(fin_curr.Issymbolrightside, pmt_curr.Issymbolrightside, org_curr.Issymbolrightside) AS \"currencySymbolAtTheRight\", "
-        + "COALESCE(f.CURRENTBALANCE, 0) AS \"currentBalance\", "
+        + "p.OVERRIDECONFIGURATION AS \"overrideconfiguration\", "
+        + "p.C_GLITEM_DIFF_ID AS \"cashDifferences\", "
+        + "p.C_GLITEM_DROPDEP_ID AS \"glItemForCashDropDeposit\", "
+        + "p.AUTOMATEMOVEMENTTOOTHER AS \"automateMovementToOtherAccount\", "
+        + "p.KEEPFIXEDAMOUNT AS \"keepFixedAmount\", "
+        + "p.AMOUNT AS \"amount\", "
+        + "p.ALLOWDONTMOVE AS \"allowNotToMove\", "
+        + "p.ALLOWMOVEEVERYTHING AS \"allowMoveEverything\", "
+        + "p.COUNTCASH AS \"countCash\", "
+        // OBPOS_APP_PAYMENT_TYPE (paymentMethod) fields
+        + "pmt.OBPOS_APP_PAYMENT_TYPE_ID AS \"paymentMethodId\", "
+        + "pmt.NAME AS \"paymentMethodName\", "
         + "COALESCE(pmt.ISCASH, 'N') AS \"iscash\", "
         + "pmt.C_CURRENCY_ID AS \"currency\", "
+        + "pmt_curr.iso_code AS \"isoCode\", "
         + "COALESCE(pmt.ALLOWOVERPAYMENT, 'N') AS \"allowOverPayment\", "
-        + "pmt.OBPOS_APP_PAYMENT_TYPE_ID AS \"paymentMethod\", "
-        + "OBPOS_CURRENCY_RATE(COALESCE(fin_curr.C_CURRENCY_ID, pmt_curr.C_CURRENCY_ID, org_curr.C_CURRENCY_ID), org_curr.C_CURRENCY_ID, null, null, app.AD_CLIENT_ID, app.AD_ORG_ID) AS \"rate\", "
-        + "app_org.NAME AS \"organization$_identifier\" "
+        // currency
+        + "COALESCE(fin_curr.ISO_CODE, pmt_curr.ISO_CODE, org_curr.ISO_CODE) AS \"isocode\", "
+        + "COALESCE(fin_curr.CURSYMBOL, pmt_curr.CURSYMBOL, org_curr.CURSYMBOL) AS \"symbol\", "
+        + "COALESCE(fin_curr.Issymbolrightside, pmt_curr.Issymbolrightside, org_curr.Issymbolrightside) AS \"currencySymbolAtTheRight\", "
+        + "COALESCE(pmt_curr.EM_OBPOS_POSPRECISION, pmt_curr.STDPRECISION) AS \"obposPosprecision\", "
+        // financial account
+        + "COALESCE(f.CURRENTBALANCE, 0) AS \"currentBalance\", "
+        // rate
+        + "OBPOS_CURRENCY_RATE(COALESCE(fin_curr.C_CURRENCY_ID, pmt_curr.C_CURRENCY_ID), org_curr.C_CURRENCY_ID, null, null, app.AD_CLIENT_ID, app.AD_ORG_ID) AS \"rate\", "
+        // organization
+        + "app_org.NAME AS \"organization$_identifier\", "
+        // payment method image
+        + "pm_img.BINARYDATA AS \"pmImageData\", "
+        + "pm_img.MIMETYPE AS \"pmImageMime\", "
+        // providerGroup
+        + "pg.OBPOS_PAYMENTGROUP_ID AS \"providerGroupId\", "
+        + "pg.NAME AS \"providerGroupName\", "
+        + "pg_img.BINARYDATA AS \"pgImageData\", "
+        + "pg_img.MIMETYPE AS \"pgImageMime\", "
+        + "pg_color.HEX_COLOR AS \"pgColor\", "
+        // paymentType
+        + "pt.OBPOS_PAYMENTMETHOD_TYPE_ID AS \"paymentTypeId\", "
+        + "pt.NAME AS \"paymentTypeName\", "
+        // color
+        + "pm_color.HEX_COLOR AS \"color\" "
         + "FROM OBPOS_APP_PAYMENT p "
         + "LEFT JOIN OBPOS_APP_PAYMENT_TYPE pmt ON pmt.OBPOS_APP_PAYMENT_TYPE_ID = p.OBPOS_APP_PAYMENT_TYPE_ID "
-        + "LEFT JOIN FIN_FINANCIAL_ACCOUNT f ON f.FIN_FINANCIAL_ACCOUNT_ID = p.FIN_Financial_Account_ID "
+        + "LEFT JOIN FIN_FINANCIAL_ACCOUNT f ON f.FIN_FINANCIAL_ACCOUNT_ID = p.FIN_FINANCIAL_ACCOUNT_ID "
         + "LEFT JOIN C_CURRENCY fin_curr ON fin_curr.C_CURRENCY_ID = f.C_CURRENCY_ID "
         + "LEFT JOIN C_CURRENCY pmt_curr ON pmt_curr.C_CURRENCY_ID = pmt.C_CURRENCY_ID "
         + "LEFT JOIN OBPOS_PAYMENTGROUP pg ON pg.OBPOS_PAYMENTGROUP_ID = pmt.OBPOS_PAYMENTGROUP_ID "
+        + "LEFT JOIN AD_IMAGE pm_img ON pm_img.AD_IMAGE_ID = pmt.AD_IMAGE_ID "
+        + "LEFT JOIN AD_IMAGE pg_img ON pg_img.AD_IMAGE_ID = pg.AD_IMAGE_ID "
+        + "LEFT JOIN AD_COLOR pm_color ON pm_color.AD_COLOR_ID = pmt.AD_COLOR_ID "
+        + "LEFT JOIN AD_COLOR pg_color ON pg_color.AD_COLOR_ID = pg.AD_COLOR_ID "
+        + "LEFT JOIN OBPOS_PAYMENTMETHOD_TYPE pt ON pt.OBPOS_PAYMENTMETHOD_TYPE_ID = pmt.OBPOS_PAYMENTMETHOD_TYPE_ID "
+        + "LEFT JOIN OBPOS_PAY_METHOD_CATEGORY pmc ON pmc.OBPOS_PAY_METHOD_CATEGORY_ID = pmt.OBPOS_PAY_METHOD_CATEGORY_ID "
         + "JOIN OBPOS_APPLICATIONS app ON app.OBPOS_APPLICATIONS_ID = p.OBPOS_APPLICATIONS_ID "
         + "JOIN AD_ORG app_org ON app_org.AD_ORG_ID = app.AD_ORG_ID "
         + "LEFT JOIN AD_ORG org ON org.AD_ORG_ID = app.AD_ORG_ID "
@@ -277,7 +354,7 @@ public class TerminalModel {
         + "WHERE p.OBPOS_APPLICATIONS_ID = :terminalId "
         + "AND p.ISACTIVE = 'Y' "
         + "AND (pmt.ISACTIVE IS NULL OR pmt.ISACTIVE = 'Y') "
-        + "ORDER BY p.LINE, p.NAME";
+        + "ORDER BY COALESCE(pmc.SEQNO, p.LINE), p.NAME";
 //@formatter:on
     @SuppressWarnings("unchecked")
     NativeQuery<Map<String, Object>> query = OBDal.getInstance()
@@ -291,28 +368,52 @@ public class TerminalModel {
     for (Map<String, Object> row : results) {
       JSONObject entry = new JSONObject();
       try {
+        // payment object
         JSONObject pay = new JSONObject();
         pay.put("id", getStringValue(row.get("id")));
-        pay.put("paymentValue", getStringValue(row.get("paymentValue")));
-        pay.put("paymentName", getStringValue(row.get("paymentName")));
-        pay.put("active", getBooleanValue(row.get("active")));
+        pay.put("searchKey", getStringValue(row.get("searchKey")));
         pay.put("commercialName", getStringValue(row.get("commercialName")));
+        pay.put("active", getBooleanValue(row.get("active")));
+        pay.put("line", getIntValue(row.get("line")));
         pay.put("allowVariableAmount", getBooleanValue(row.get("allowVariableAmount")));
+        pay.put("overrideconfiguration", getBooleanValue(row.get("overrideconfiguration")));
+        pay.put("cashDifferences", getStringValue(row.get("cashDifferences")));
+        pay.put("gLItemForCashDropDeposit", getStringValue(row.get("glItemForCashDropDeposit")));
+        pay.put("automateMovementToOtherAccount",
+            getBooleanValue(row.get("automateMovementToOtherAccount")));
+        pay.put("keepFixedAmount", getBooleanValue(row.get("keepFixedAmount")));
+        pay.put("amount",
+            row.get("amount") instanceof Number ? row.get("amount") : JSONObject.NULL);
+        pay.put("allowNotToMove", getBooleanValue(row.get("allowNotToMove")));
+        pay.put("allowMoveEverything", getBooleanValue(row.get("allowMoveEverything")));
+        pay.put("countCash", getBooleanValue(row.get("countCash")));
         pay.put("organization$_identifier", getStringValue(row.get("organization$_identifier")));
         entry.put("payment", pay);
 
-        entry.put("isoCode", getStringValue(row.get("isoCode")));
-        entry.put("symbol", getStringValue(row.get("symbol")));
-        entry.put("currencySymbolAtTheRight", getBooleanValue(row.get("currencySymbolAtTheRight")));
-        entry.put("currentBalance", getStringValue(row.get("currentBalance")));
-
+        // paymentMethod object
         JSONObject paymentMethod = new JSONObject();
+        paymentMethod.put("id", getStringValue(row.get("paymentMethodId")));
+        paymentMethod.put("name", getStringValue(row.get("paymentMethodName")));
         paymentMethod.put("iscash", getBooleanValue(row.get("iscash")));
         paymentMethod.put("currency", getStringValue(row.get("currency")));
+        paymentMethod.put("currency$_identifier", getStringValue(row.get("isoCode")));
         paymentMethod.put("allowOverPayment", getBooleanValue(row.get("allowOverPayment")));
-        paymentMethod.put("paymentMethod", getStringValue(row.get("paymentMethod")));
+        if (Boolean.TRUE.equals(getBooleanValue(row.get("overrideconfiguration")))) {
+          paymentMethod.put("cashDifferences", getStringValue(row.get("cashDifferences")));
+          paymentMethod.put("glitemDropdep", getStringValue(row.get("glItemForCashDropDeposit")));
+          paymentMethod.put("automatemovementtoother",
+              getBooleanValue(row.get("automateMovementToOtherAccount")));
+          paymentMethod.put("keepfixedamount", getBooleanValue(row.get("keepFixedAmount")));
+          paymentMethod.put("amount",
+              row.get("amount") instanceof Number ? row.get("amount") : JSONObject.NULL);
+          paymentMethod.put("allowvariableamount", getBooleanValue(row.get("allowVariableAmount")));
+          paymentMethod.put("allowdontmove", getBooleanValue(row.get("allowNotToMove")));
+          paymentMethod.put("allowmoveeverything", getBooleanValue(row.get("allowMoveEverything")));
+          paymentMethod.put("countcash", getBooleanValue(row.get("countCash")));
+        }
         entry.put("paymentMethod", paymentMethod);
 
+        // rate / mulrate
         String rateStr = getStringValue(row.get("rate"));
         BigDecimal rate = (rateStr != null && !rateStr.isEmpty()) ? new BigDecimal(rateStr)
             : BigDecimal.ZERO;
@@ -322,6 +423,57 @@ public class TerminalModel {
         }
         entry.put("rate", rate.toPlainString());
         entry.put("mulrate", mulrate.toPlainString());
+
+        // currency fields
+        entry.put("isocode", getStringValue(row.get("isocode")));
+        entry.put("symbol", getStringValue(row.get("symbol")));
+        entry.put("currencySymbolAtTheRight", getBooleanValue(row.get("currencySymbolAtTheRight")));
+        entry.put("currentBalance",
+            row.get("currentBalance") instanceof Number ? row.get("currentBalance")
+                : JSONObject.NULL);
+        entry.put("obposPosprecision",
+            row.get("obposPosprecision") instanceof Number ? row.get("obposPosprecision")
+                : JSONObject.NULL);
+
+        // payment method image
+        Object pmImageData = row.get("pmImageData");
+        Object pmImageMime = row.get("pmImageMime");
+        if (pmImageData instanceof byte[] && pmImageMime != null) {
+          entry.put("image",
+              "data:" + pmImageMime + ";base64," + Base64.encodeBase64String((byte[]) pmImageData));
+        } else {
+          entry.put("image", JSONObject.NULL);
+        }
+
+        // providerGroup
+        String providerGroupId = getStringValue(row.get("providerGroupId"));
+        if (!providerGroupId.isEmpty()) {
+          JSONObject providerGroup = new JSONObject();
+          providerGroup.put("id", providerGroupId);
+          providerGroup.put("name", getStringValue(row.get("providerGroupName")));
+          providerGroup.put("color", getStringValue(row.get("pgColor")));
+          Object pgImageData = row.get("pgImageData");
+          Object pgImageMime = row.get("pgImageMime");
+          if (pgImageData instanceof byte[] && pgImageMime != null) {
+            providerGroup.put("image", "data:" + pgImageMime + ";base64,"
+                + Base64.encodeBase64String((byte[]) pgImageData));
+          } else {
+            providerGroup.put("image", JSONObject.NULL);
+          }
+          entry.put("providerGroup", providerGroup);
+        }
+
+        // paymentType
+        String paymentTypeId = getStringValue(row.get("paymentTypeId"));
+        if (!paymentTypeId.isEmpty()) {
+          JSONObject paymentType = new JSONObject();
+          paymentType.put("id", paymentTypeId);
+          paymentType.put("name", getStringValue(row.get("paymentTypeName")));
+          entry.put("paymentType", paymentType);
+        }
+
+        // color
+        entry.put("color", getStringValue(row.get("color")));
 
       } catch (JSONException e) {
         log.error("Error building payment JSON", e);
