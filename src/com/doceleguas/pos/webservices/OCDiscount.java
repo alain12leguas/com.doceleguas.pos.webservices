@@ -1,6 +1,7 @@
 package com.doceleguas.pos.webservices;
 
 import java.util.Map;
+
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
@@ -91,9 +92,11 @@ public class OCDiscount extends Model {
     sql.append("            'm_product_id', mp.m_product_id, ");
     sql.append("            'm_product_value', mp.value, ");
     sql.append("            'm_offer_disc_qty', mop.em_obdisc_qty, ");
-    sql.append("            'discIsGift', CASE WHEN mop.em_obdisc_is_gift = 'Y' THEN true ELSE false END, ");
+    sql.append(
+        "            'discIsGift', CASE WHEN mop.em_obdisc_is_gift = 'Y' THEN true ELSE false END, ");
     sql.append("            'discGiftQty', mop.em_obdisc_gifqty, ");
-    sql.append("            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mp.name, '') ");
+    sql.append(
+        "            '_identifier', COALESCE(e.name, '') || ' - ' || COALESCE(mp.name, '') ");
     sql.append("        ) ");
     sql.append("    ) AS js ");
     sql.append("    FROM m_offer_product mop ");

@@ -17,11 +17,9 @@ import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
-import org.hibernate.criterion.Restrictions;
 import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.AliasToEntityMapResultTransformer;
 import org.openbravo.dal.core.OBContext;
-import org.openbravo.dal.service.OBCriteria;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.erpCommon.businessUtility.Preferences;
 import org.openbravo.erpCommon.utility.PropertyException;
@@ -36,9 +34,13 @@ public class TerminalModel {
 
   private static final Logger log = LogManager.getLogger();
 
-  public NativeQuery<?> createQuery(JSONObject jsonParams) {
-    String terminalSearchKey = jsonParams.optString("terminalSearchKey", null);
-    String priceListId = null;
+  private final OBPOSApplications terminal;
+
+  public TerminalModel(OBPOSApplications terminal) {
+    this.terminal = terminal;
+  }
+
+  public NativeQuery<?> createQuery() {
     int sessionTimeout;
     try {
       String sessionShouldExpire = Preferences.getPreferenceValue("OBPOS_SessionTimeout", true,
@@ -53,31 +55,30 @@ public class TerminalModel {
     } catch (PropertyException e) {
       sessionTimeout = 0;
     }
-    OBPOSApplications pOSTerminal = getTerminal(terminalSearchKey);
-    org.openbravo.model.pricing.pricelist.PriceList priceList = org.openbravo.retail.posterminal.POSUtils
-        .getPriceListByTerminalId(pOSTerminal.getId());
+
+    org.openbravo.model.pricing.pricelist.PriceList priceList = POSUtils
+        .getPriceListByTerminalId(terminal.getId());
 
     final int lastDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "lastassignednum", false)
+        .getLastTerminalDocumentSequence(terminal, "lastassignednum", false)
         .intValue();
     final int lastQuotationDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "quotationslastassignednum", false)
+        .getLastTerminalDocumentSequence(terminal, "quotationslastassignednum", false)
         .intValue();
     final int lastReturnDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "returnslastassignednum", false)
+        .getLastTerminalDocumentSequence(terminal, "returnslastassignednum", false)
         .intValue();
     final int lastFullInvoiceDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "fullinvoiceslastassignednum", true)
+        .getLastTerminalDocumentSequence(terminal, "fullinvoiceslastassignednum", true)
         .intValue();
     final int lastFullReturnInvoiceDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "fullreturninvoiceslastassignednum", true)
+        .getLastTerminalDocumentSequence(terminal, "fullreturninvoiceslastassignednum", true)
         .intValue();
     final int lastSimplifiedInvoiceDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "simplifiedinvoiceslastassignednum", true)
+        .getLastTerminalDocumentSequence(terminal, "simplifiedinvoiceslastassignednum", true)
         .intValue();
     final int lastSimplifiedReturnInvoiceDocumentNumber = POSUtils
-        .getLastTerminalDocumentSequence(pOSTerminal, "simplifiedreturninvoiceslastassignednum",
-            true)
+        .getLastTerminalDocumentSequence(terminal, "simplifiedreturninvoiceslastassignednum", true)
         .intValue();
 
     StringBuilder sql = new StringBuilder();
@@ -108,7 +109,7 @@ public class TerminalModel {
     sql.append(" LEFT JOIN C_CURRENCY curr ON curr.C_CURRENCY_ID = pl.C_CURRENCY_ID ");
     sql.append(" LEFT JOIN M_WAREHOUSE w ON w.AD_ORG_ID = o.AD_ORG_ID AND w.ISACTIVE = 'Y' ");
     sql.append(" LEFT JOIN AD_IMAGE img ON img.AD_IMAGE_ID = oi.YOUR_COMPANY_DOCUMENT_IMAGE ");
-    sql.append(" WHERE t.VALUE = :terminalSearchKey ");
+    sql.append(" WHERE t.OBPOS_APPLICATIONS_ID = :terminalId ");
     sql.append(" AND  t.ISACTIVE = 'Y'");
     sql.append(" LIMIT 1");
 
@@ -118,9 +119,7 @@ public class TerminalModel {
         .createNativeQuery(sql.toString())
         .setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
 
-    if (terminalSearchKey != null && !terminalSearchKey.isEmpty()) {
-      query.setParameter("terminalSearchKey", terminalSearchKey);
-    }
+    query.setParameter("terminalId", terminal.getId());
     query.setParameter("priceListId", priceList.getId());
 
     return query;
@@ -131,6 +130,7 @@ public class TerminalModel {
     select.append("t.OBPOS_APPLICATIONS_ID AS \"id\", ");
     select.append("t.VALUE AS \"searchKey\", ");
     select.append("t.NAME AS \"_identifier\", ");
+    select.append("o.AD_CLIENT_ID AS \"client\", ");
     select.append("o.AD_ORG_ID AS \"organization\", ");
     select.append("loc.C_COUNTRY_ID AS \"organizationCountryId\", ");
     select.append("loc.C_REGION_ID AS \"organizationRegionId\", ");
@@ -174,22 +174,15 @@ public class TerminalModel {
   }
 
   public JSONObject buildTerminalJson(Map<String, Object> rowMap) {
-    JSONObject terminal = new JSONObject();
+    JSONObject terminalJson = new JSONObject();
     try {
       // Direct fields
-      terminal.put("id", getStringValue(rowMap.get("id")));
-      terminal.put("organization", getStringValue(rowMap.get("organization")));
-      terminal.put("organizationCountryId", getStringValue(rowMap.get("organizationCountryId")));
-      terminal.put("organizationRegionId", getStringValue(rowMap.get("organizationRegionId")));
-      terminal.put("organization$_identifier", getStringValue(rowMap.get("organizationName")));
-      terminal.put("organizationTaxId", getStringValue(rowMap.get("organizationTaxId")));
-      terminal.put("organizationAddressIdentifier",
-          getStringValue(rowMap.get("organizationAddressIdentifier")));
-      terminal.put("priceIncludesTax", getBooleanValue(rowMap.get("priceIncludesTax")));
+      terminalJson.put("id", getStringValue(rowMap.get("id")));
 
       // terminal.terminal
       JSONObject innerTerminal = new JSONObject();
       innerTerminal.put("id", getStringValue(rowMap.get("id")));
+      innerTerminal.put("client", getStringValue(rowMap.get("client")));
       innerTerminal.put("organization", getStringValue(rowMap.get("organization")));
       innerTerminal.put("organizationCountryId",
           getStringValue(rowMap.get("organizationCountryId")));
@@ -214,7 +207,7 @@ public class TerminalModel {
           getIntValue(rowMap.get("lastSimplifiedInvoiceDocumentNumber")));
       innerTerminal.put("lastFullReturnInvoiceDocumentNumber",
           getIntValue(rowMap.get("lastFullReturnInvoiceDocumentNumber")));
-      terminal.put("terminal", innerTerminal);
+      terminalJson.put("terminal", innerTerminal);
 
       // terminal.currency
       JSONObject currency = new JSONObject();
@@ -226,7 +219,7 @@ public class TerminalModel {
       currency.put("currencySymbolAtTheRight",
           getBooleanValue(rowMap.get("currencySymbolAtTheRight")));
       currency.put("_identifier", getStringValue(rowMap.get("currencyISOCode")));
-      terminal.put("currency", currency);
+      terminalJson.put("currency", currency);
 
       // terminal.pricelist
       JSONObject pricelist = new JSONObject();
@@ -234,30 +227,30 @@ public class TerminalModel {
       pricelist.put("name", getStringValue(rowMap.get("pricelistName")));
       pricelist.put("priceIncludesTax", getBooleanValue(rowMap.get("priceIncludesTax")));
       pricelist.put("currency$_identifier", getStringValue(rowMap.get("currencyISOCode")));
-      terminal.put("pricelist", pricelist);
+      terminalJson.put("pricelist", pricelist);
 
       // Organization image
       Object imageData = rowMap.get("organizationImageData");
       Object imageMime = rowMap.get("organizationImageMime");
       if (imageData instanceof byte[] && imageMime != null) {
-        terminal.put("organizationImage",
+        terminalJson.put("organizationImage",
             "data:" + imageMime + ";base64," + Base64.encodeBase64String((byte[]) imageData));
       } else {
-        terminal.put("organizationImage", JSONObject.NULL);
+        terminalJson.put("organizationImage", JSONObject.NULL);
       }
     } catch (JSONException e) {
       log.error("Error building terminal JSON", e);
     }
-    return terminal;
+    return terminalJson;
   }
 
-  public JSONArray getPayments(String terminalId) {
+  public JSONArray getPayments() {
     JSONArray payments = new JSONArray();
 
 //@formatter:off
     String sql = "SELECT p.OBPOS_APP_PAYMENT_ID AS \"id\", "
         + "p.VALUE AS \"paymentValue\", "
-        + "p.ISACTIVE AS \"isActive\", "
+        + "p.ISACTIVE AS \"active\", "
         + "p.name AS \"commercialName\", "
         + "p.ALLOWVARIABLEAMOUNT AS \"allowVariableAmount\", "
         + "COALESCE(fin_curr.ISO_CODE, pmt_curr.ISO_CODE, org_curr.ISO_CODE) AS \"isoCode\", "
@@ -291,7 +284,7 @@ public class TerminalModel {
         .getSession()
         .createNativeQuery(sql);
     query.setResultTransformer(AliasToEntityMapResultTransformer.INSTANCE);
-    query.setParameter("terminalId", terminalId);
+    query.setParameter("terminalId", terminal.getId());
 
     List<Map<String, Object>> results = query.getResultList();
 
@@ -302,7 +295,7 @@ public class TerminalModel {
         pay.put("id", getStringValue(row.get("id")));
         pay.put("paymentValue", getStringValue(row.get("paymentValue")));
         pay.put("paymentName", getStringValue(row.get("paymentName")));
-        pay.put("isActive", getBooleanValue(row.get("isActive")));
+        pay.put("active", getBooleanValue(row.get("active")));
         pay.put("commercialName", getStringValue(row.get("commercialName")));
         pay.put("allowVariableAmount", getBooleanValue(row.get("allowVariableAmount")));
         pay.put("organization$_identifier", getStringValue(row.get("organization$_identifier")));
@@ -339,17 +332,17 @@ public class TerminalModel {
     return payments;
   }
 
-  public JSONArray getPriceLists(String organizationId) {
+  public JSONArray getPriceLists() {
     JSONArray priceLists = new JSONArray();
 //@formatter:off
-    String sql = "SELECT pl.M_PRICELIST_ID AS \"id\", " 
-        + "pl.NAME AS \"name\", "         
+    String sql = "SELECT pl.M_PRICELIST_ID AS \"id\", "
+        + "pl.NAME AS \"name\", "
         + "curr.C_CURRENCY_ID AS \"currency\", "
         + "curr.ISO_CODE AS \"currency$_identifier\" "
         + "FROM M_PRICELIST pl "
         + "LEFT JOIN C_CURRENCY curr ON curr.C_CURRENCY_ID = pl.C_CURRENCY_ID "
         + "WHERE pl.ISACTIVE = 'Y' "
-        + "AND pl.IsSOPriceList = 'Y' " 
+        + "AND pl.IsSOPriceList = 'Y' "
         + "ORDER BY pl.NAME";
   //@formatter:on
     @SuppressWarnings("unchecked")
@@ -383,17 +376,17 @@ public class TerminalModel {
     return priceLists;
   }
 
+  @SuppressWarnings("deprecation")
   public JSONArray getCurrencyPanel() {
     JSONArray result = new JSONArray();
 
-    String sql = "SELECT e.LINE AS \"lineNo\", "
-        + "e.C_CURRENCY_ID AS \"currency\", "
-        + "e.BACKCOLOR AS \"backcolor\", "
-        + "e.BORDERCOLOR AS \"bordercolor\", "
-        + "e.AMOUNT AS \"amount\" "
-        + "FROM OBPOS_CURRENCY_PANEL e "
-        + "WHERE e.ISACTIVE = 'Y' "
-        + "ORDER BY e.LINE ASC";
+    String sql = "SELECT e.LINE AS \"lineNo\", "//
+        + "e.C_CURRENCY_ID AS \"currency\", "//
+        + "e.BACKCOLOR AS \"backcolor\", " //
+        + "e.BORDERCOLOR AS \"bordercolor\", "//
+        + "e.AMOUNT AS \"amount\" " //
+        + "FROM OBPOS_CURRENCY_PANEL e "//
+        + "WHERE e.ISACTIVE = 'Y' " + "ORDER BY e.LINE ASC";
 
     @SuppressWarnings("unchecked")
     NativeQuery<Map<String, Object>> query = OBDal.getInstance()
@@ -420,12 +413,11 @@ public class TerminalModel {
     return result;
   }
 
-  public JSONArray getCashMgmtDepositEvents(String terminalId) {
-    OBPOSApplications pOSTerminal = getTerminal(terminalId);
+  public JSONArray getCashMgmtDepositEvents() {
     JSONArray events = new JSONArray();
     OBContext.getOBContext()
-        .getOrganizationStructureProvider(pOSTerminal.getClient().getId())
-        .getNaturalTree(pOSTerminal.getOrganization().getId());
+        .getOrganizationStructureProvider(terminal.getClient().getId())
+        .getNaturalTree(terminal.getOrganization().getId());
     String sql = "SELECT ev.Obretco_Cmevents_ID AS \"id\", " //
         + "ev.NAME AS \"name\", " //
         + "'deposit' as \"type\", "//
@@ -446,7 +438,7 @@ public class TerminalModel {
         .setParameterList("orgs",
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
-                .getNaturalTree(pOSTerminal.getOrganization().getId()));
+                .getNaturalTree(terminal.getOrganization().getId()));
 
     List<Map<String, Object>> results = query.getResultList();
 
@@ -468,12 +460,11 @@ public class TerminalModel {
     return events;
   }
 
-  public JSONArray getCashMgmtDropEvents(String terminalId) {
-    OBPOSApplications pOSTerminal = getTerminal(terminalId);
+  public JSONArray getCashMgmtDropEvents() {
     JSONArray events = new JSONArray();
     OBContext.getOBContext()
-        .getOrganizationStructureProvider(pOSTerminal.getClient().getId())
-        .getNaturalTree(pOSTerminal.getOrganization().getId());
+        .getOrganizationStructureProvider(terminal.getClient().getId())
+        .getNaturalTree(terminal.getOrganization().getId());
     String sql = "SELECT ev.Obretco_Cmevents_ID AS \"id\", " //
         + "ev.NAME AS \"name\", " //
         + "'drop' as \"type\", "//
@@ -494,7 +485,7 @@ public class TerminalModel {
         .setParameterList("orgs",
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
-                .getNaturalTree(pOSTerminal.getOrganization().getId()));
+                .getNaturalTree(terminal.getOrganization().getId()));
 
     List<Map<String, Object>> results = query.getResultList();
 
@@ -519,20 +510,19 @@ public class TerminalModel {
   public JSONArray getExchangeRates() {
     JSONArray rates = new JSONArray();
 
-    String sql = "SELECT curr.ISO_CODE AS \"isoCode\", "
-        + "curr.CURSYMBOL AS \"currSymbol\", "
-        + "r.C_CURRENCY_ID AS \"currId\", "
-        + "tocurr.ISO_CODE AS \"toIsoCode\", "
-        + "tocurr.CURSYMBOL AS \"toCurrSymbol\", "
-        + "r.C_CURRENCY_ID_TO AS \"toCurrId\", "
-        + "r.VALIDFROM AS \"validFrom\", "
-        + "r.VALIDTO AS \"validTo\", "
-        + "r.MULTIPLYRATE AS \"multRate\" "
-        + "FROM C_CONVERSION_RATE r "
-        + "JOIN C_CURRENCY curr ON curr.C_CURRENCY_ID = r.C_CURRENCY_ID "
-        + "JOIN C_CURRENCY tocurr ON tocurr.C_CURRENCY_ID = r.C_CURRENCY_ID_TO "
-        + "WHERE r.VALIDFROM <= CURRENT_DATE "
-        + "AND r.VALIDTO >= CURRENT_DATE";
+    String sql = "SELECT curr.ISO_CODE AS \"isoCode\", "//
+        + "curr.CURSYMBOL AS \"currSymbol\", "//
+        + "r.C_CURRENCY_ID AS \"currId\", " //
+        + "tocurr.ISO_CODE AS \"toIsoCode\", "//
+        + "tocurr.CURSYMBOL AS \"toCurrSymbol\", " //
+        + "r.C_CURRENCY_ID_TO AS \"toCurrId\", "//
+        + "r.VALIDFROM AS \"validFrom\", " //
+        + "r.VALIDTO AS \"validTo\", "//
+        + "r.MULTIPLYRATE AS \"multRate\" " //
+        + "FROM C_CONVERSION_RATE r "//
+        + "JOIN C_CURRENCY curr ON curr.C_CURRENCY_ID = r.C_CURRENCY_ID "//
+        + "JOIN C_CURRENCY tocurr ON tocurr.C_CURRENCY_ID = r.C_CURRENCY_ID_TO "//
+        + "WHERE r.VALIDFROM <= CURRENT_DATE " + "AND r.VALIDTO >= CURRENT_DATE";//
 
     @SuppressWarnings("unchecked")
     NativeQuery<Map<String, Object>> query = OBDal.getInstance()
@@ -563,16 +553,17 @@ public class TerminalModel {
     return rates;
   }
 
-  public JSONArray getHardwareUrl(String terminalId) {
+  public JSONArray getHardwareUrl() {
     JSONArray result = new JSONArray();
-    OBPOSApplications terminal = getTerminal(terminalId);
 
-    String sql = "SELECT p.OBPOS_HARDWAREURL_ID AS \"id\", " + "hwm.NAME AS \"_identifier\", "
-        + "hwm.HARDWAREURL AS \"hardwareURL\", " + "hwm.ISRECEIPTPRINTER AS \"hasReceiptPrinter\", "
-        + "hwm.ISPDFPRINTER AS \"hasPDFPrinter\", " + "hwm.BARCODE AS \"barcode\" "
-        + "FROM OBPOS_HARDWAREURL p "
-        + "JOIN OBPOS_HARDWAREMNG hwm ON hwm.OBPOS_HARDWAREMNG_ID = p.OBPOS_HARDWAREMNG_ID "
-        + "WHERE p.OBPOS_TERMINALTYPE_ID = :terminalTypeId " + "AND p.ISACTIVE = 'Y' "
+    String sql = "SELECT p.OBPOS_HARDWAREURL_ID AS \"id\", " //
+        + "hwm.NAME AS \"_identifier\", " //
+        + "hwm.HARDWAREURL AS \"hardwareURL\", " //
+        + "hwm.ISRECEIPTPRINTER AS \"hasReceiptPrinter\", "
+        + "hwm.ISPDFPRINTER AS \"hasPDFPrinter\", " //
+        + "hwm.BARCODE AS \"barcode\" " + "FROM OBPOS_HARDWAREURL p "//
+        + "JOIN OBPOS_HARDWAREMNG hwm ON hwm.OBPOS_HARDWAREMNG_ID = p.OBPOS_HARDWAREMNG_ID "//
+        + "WHERE p.OBPOS_TERMINALTYPE_ID = :terminalTypeId " + "AND p.ISACTIVE = 'Y' "//
         + "ORDER BY hwm.NAME";
 
     @SuppressWarnings("unchecked")
@@ -606,11 +597,12 @@ public class TerminalModel {
     JSONArray result = new JSONArray();
     String language = OBContext.getOBContext().getLanguage().getLanguage();
 
-    String sql = "SELECT list.VALUE AS \"id\", " + "COALESCE(trl.NAME, list.NAME) AS \"name\" "
-        + "FROM AD_REF_LIST list "
-        + "LEFT JOIN AD_REF_LIST_TRL trl ON trl.AD_REF_LIST_ID = list.AD_REF_LIST_ID "
-        + "  AND trl.AD_LANGUAGE = :language "
-        + "WHERE list.AD_REFERENCE_ID = '41D44C94D0AC41DEBA9A2BEB0EAF059C' "
+    String sql = "SELECT list.VALUE AS \"id\", " //
+        + "COALESCE(trl.NAME, list.NAME) AS \"name\" " //
+        + "FROM AD_REF_LIST list " //
+        + "LEFT JOIN AD_REF_LIST_TRL trl ON trl.AD_REF_LIST_ID = list.AD_REF_LIST_ID " //
+        + "  AND trl.AD_LANGUAGE = :language " //
+        + "WHERE list.AD_REFERENCE_ID = '41D44C94D0AC41DEBA9A2BEB0EAF059C' " //
         + "AND list.ISACTIVE = 'Y' " + "ORDER BY list.SEQNO";
 
     @SuppressWarnings("unchecked")
@@ -689,15 +681,5 @@ public class TerminalModel {
       return (Boolean) value;
     }
     return "Y".equalsIgnoreCase(value.toString());
-  }
-
-  private OBPOSApplications getTerminal(String term) {
-    OBCriteria<OBPOSApplications> terminalCriteria = OBDal.getInstance()
-        .createCriteria(OBPOSApplications.class);
-    terminalCriteria
-        .add(Restrictions.or(Restrictions.eq(OBPOSApplications.PROPERTY_SEARCHKEY, term),
-            Restrictions.eq(OBPOSApplications.PROPERTY_ID, term)));
-    terminalCriteria.setMaxResults(1);
-    return (OBPOSApplications) terminalCriteria.uniqueResult();
   }
 }
