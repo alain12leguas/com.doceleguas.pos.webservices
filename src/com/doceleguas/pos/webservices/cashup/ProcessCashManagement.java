@@ -37,7 +37,7 @@ import org.openbravo.retail.posterminal.OBPOSAppPayment;
 import org.openbravo.retail.posterminal.OBPOSPaymentMethodCashup;
 import org.openbravo.retail.posterminal.OBPOSPaymentcashupEvents;
 import org.openbravo.retail.posterminal.ProcessCashMgmtHook;
-import org.openbravo.retail.posterminal.UpdateCashup;
+import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 

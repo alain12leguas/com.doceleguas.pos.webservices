@@ -30,6 +30,7 @@ import org.apache.commons.lang.time.DateFormatUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
+import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.criterion.Restrictions;
 import org.openbravo.advpaymentmngt.process.FIN_AddPayment;
@@ -50,12 +51,14 @@ import org.openbravo.model.common.currency.Currency;
 import org.openbravo.model.common.enterprise.DocumentType;
 import org.openbravo.model.common.enterprise.Organization;
 import org.openbravo.model.common.enterprise.Warehouse;
+import org.openbravo.model.common.invoice.Invoice;
 import org.openbravo.model.common.order.Order;
 import org.openbravo.model.common.order.OrderLine;
 import org.openbravo.model.common.plm.Product;
 import org.openbravo.model.common.uom.UOM;
 import org.openbravo.model.financialmgmt.payment.FIN_FinancialAccount;
 import org.openbravo.model.financialmgmt.payment.FIN_Payment;
+import org.openbravo.model.financialmgmt.payment.FIN_PaymentDetail;
 import org.openbravo.model.financialmgmt.payment.FIN_PaymentMethod;
 import org.openbravo.model.financialmgmt.payment.FIN_PaymentSchedule;
 import org.openbravo.model.financialmgmt.payment.FIN_PaymentScheduleDetail;
@@ -63,10 +66,14 @@ import org.openbravo.model.financialmgmt.payment.PaymentTerm;
 import org.openbravo.model.financialmgmt.tax.TaxRate;
 import org.openbravo.model.materialmgmt.transaction.ShipmentInOut;
 import org.openbravo.model.pricing.pricelist.PriceList;
+import org.openbravo.retail.posterminal.OBPOSAppCashup;
+import org.openbravo.retail.posterminal.OBPOSAppPayment;
 import org.openbravo.retail.posterminal.OBPOSApplications;
+import org.openbravo.retail.posterminal.TerminalTypePaymentMethod;
 import org.openbravo.service.db.DalConnectionProvider;
 import org.openbravo.service.json.JsonConstants;
 
+import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
 import com.doceleguas.pos.webservices.orderload.OrderFlowType;
 import com.doceleguas.pos.webservices.orderload.OrderFlowUtils;
 import com.doceleguas.pos.webservices.orderload.spi.OrderPersistencePort;
@@ -98,6 +105,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     JSONArray processedOrders = new JSONArray();
     for (int i = 0; i < data.length(); i++) {
       JSONObject orderJson = data.getJSONObject(i);
+      updateCashUpReportIfPresent(orderJson);
+      verifyCashupStatusIfApplicable(orderJson);
       ensureSupportedOrderFlow(orderJson);
       OrderFlowType flow = OrderFlowUtils.classify(orderJson);
       log.info("[OCOrder][core] processing documentNo={} flow={} step={}",
@@ -115,6 +124,11 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       if (shouldCompleteOrder(orderJson)) {
         completeOrder(order, orderJson);
       }
+      // Lines + DB triggers must persist before shipment/invoice read order totals; otherwise
+      // grand total can still be 0 in memory and invoice + PSD→invoice links are skipped (no
+      // fin_payment_scheduledetail.fin_payment_schedule_invoice → empty Payment Details on invoice).
+      OBDal.getInstance().flush();
+      OBDal.getInstance().refresh(order);
       if (shouldCreateStandardPosDocuments(orderJson)) {
         nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
         nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
@@ -137,6 +151,54 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     response.put("orders", processedOrders);
     response.put("pipeline", "core");
     return response;
+  }
+
+  /**
+   * Parity with {@code OrderLoader.saveRecord}: apply cashup snapshot from the order payload before
+   * order persistence.
+   */
+  private void updateCashUpReportIfPresent(JSONObject orderJson) throws Exception {
+    if (!orderJson.has("cashUpReportInformation")) {
+      return;
+    }
+    JSONObject jsonCashup = orderJson.getJSONObject("cashUpReportInformation");
+    Date cashUpDate = new Date();
+    UpdateCashup.getAndUpdateCashUp(jsonCashup.getString("id"), jsonCashup, cashUpDate);
+  }
+
+  /**
+   * Parity with {@code OrderLoader.verifyCashupStatus}: reject if the cashup in the report is
+   * already processed in BO (same exclusions as retail: quotation / layaway / cancel layaway).
+   */
+  private void verifyCashupStatusIfApplicable(JSONObject orderJson) throws Exception {
+    boolean isQuotation = orderJson.optBoolean("isQuotation", false);
+    boolean isLayaway = orderJson.optBoolean("isLayaway", false);
+    boolean cancelLayaway = orderJson.optBoolean("cancelLayaway", false);
+    if (isQuotation || isLayaway || cancelLayaway) {
+      return;
+    }
+    verifyCashupStatus(orderJson);
+  }
+
+  private void verifyCashupStatus(JSONObject orderJson) throws JSONException, OBException {
+    OBContext.setAdminMode(false);
+    try {
+      if (!orderJson.has("cashUpReportInformation")) {
+        return;
+      }
+      JSONObject cashUpInfo = orderJson.getJSONObject("cashUpReportInformation");
+      if (cashUpInfo == null || !cashUpInfo.has("id")
+          || cashUpInfo.getString("id").equals("")) {
+        return;
+      }
+      OBPOSAppCashup cashUp = OBDal.getInstance()
+          .get(OBPOSAppCashup.class, cashUpInfo.getString("id"));
+      if (cashUp != null && cashUp.isProcessedbo()) {
+        throw new OBException("The cashup related to this order has been processed");
+      }
+    } finally {
+      OBContext.restorePreviousMode();
+    }
   }
 
   private JSONObject successOrderJson(Order order, boolean duplicate) throws Exception {
@@ -477,8 +539,15 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       return;
     }
 
+    OBDal.getInstance().flush();
+    OBDal.getInstance().refresh(order);
+
     List<FIN_Payment> created = new ArrayList<>();
     FIN_PaymentSchedule paymentSchedule = createOrReuseOrderPaymentSchedule(order);
+    ensureInitialOutstandingPsdLikeOrderLoader(order, orderJson, paymentSchedule);
+    FIN_PaymentSchedule invoiceScheduleForPsd = linkOrderPsdToInvoicePaymentScheduleIfInvoiceExists(
+        order, paymentSchedule);
+    OBDal.getInstance().flush();
     int paymentCount = 0;
     for (int i = 0; i < payments.length(); i++) {
       JSONObject paymentJson = payments.getJSONObject(i);
@@ -515,13 +584,11 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         paymentDocNo = "*R*" + paymentDocNo;
       }
       Date paymentDate = parseDate(paymentJson.optString("date", null));
-      String paymentId = paymentJson.optString("id", null);
-      if (!isLikelyId(paymentId)) {
-        paymentId = null;
-      }
 
       FIN_PaymentScheduleDetail psd = resolveOrCreateOutstandingOrderPSD(paymentSchedule, order,
-          amount);
+          amount, invoiceScheduleForPsd);
+      // FIN_AddPayment.savePayment calls refresh() on each PSD; the row must exist first.
+      OBDal.getInstance().flush();
       List<FIN_PaymentScheduleDetail> selectedPSD = new ArrayList<>();
       selectedPSD.add(psd);
       HashMap<String, BigDecimal> selectedPSDAmounts = new HashMap<>();
@@ -531,23 +598,149 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       }
       selectedPSDAmounts.put(psd.getId(), psdAllocation);
 
+      // Let the server assign FIN_Payment.id (OrderLoader does not set it from POS line UUIDs).
       FIN_Payment payment = FIN_AddPayment.savePayment(null, isReceipt, paymentDocType, paymentDocNo,
           order.getBusinessPartner(), paymentResolution.paymentMethod,
           paymentResolution.financialAccount, amount.toPlainString(), paymentDate,
           order.getOrganization(), null, selectedPSD, selectedPSDAmounts, false, false,
-          order.getCurrency(), BigDecimal.ONE, amount, true, paymentId);
+          order.getCurrency(), BigDecimal.ONE, amount, true, null);
+      // Invoice Payment Details tab joins PSD rows by fin_payment_schedule_invoice; if only the
+      // order FK was set, Sales Order shows lines but Invoice plan stays empty.
+      ensureInvoicePaymentPlanSharesSavedPaymentDetails(payment, invoiceScheduleForPsd);
       FIN_PaymentProcess.doProcessPayment(payment, "P", null, null);
+      ensureInvoicePaymentPlanSharesSavedPaymentDetails(payment, invoiceScheduleForPsd);
       created.add(payment);
       paymentCount++;
     }
 
     if (!created.isEmpty()) {
+      syncInvoiceHeaderAndScheduleAfterPosPayments(order, created);
+      OBDal.getInstance().flush();
+    }
+  }
+
+  /**
+   * FIN_PaymentProcess may skip {@link FIN_AddPayment#updatePaymentScheduleAmounts} for the invoice
+   * schedule depending on payment-status sequencing (invoicePaidAmounts guard). Retail updates invoice
+   * totals after payments via {@code InvoiceUtils.setPaidAmountAtInvoicing} / monitor. Align header
+   * + invoice payment plan with actual FIN_Payment rows we just created.
+   */
+  private void syncInvoiceHeaderAndScheduleAfterPosPayments(Order order, List<FIN_Payment> payments) {
+    if (payments == null || payments.isEmpty()) {
+      return;
+    }
+    OBCriteria<Invoice> invCrit = OBDal.getInstance().createCriteria(Invoice.class);
+    invCrit.add(Restrictions.eq(Invoice.PROPERTY_SALESORDER, order));
+    invCrit.setMaxResults(1);
+    Invoice invoice = (Invoice) invCrit.uniqueResult();
+    if (invoice == null) {
+      return;
+    }
+    BigDecimal sumPaid = BigDecimal.ZERO;
+    for (FIN_Payment p : payments) {
+      OBDal.getInstance().refresh(p);
+      if (p.getAmount() != null) {
+        sumPaid = sumPaid.add(p.getAmount());
+      }
+    }
+    BigDecimal gross = invoice.getGrandTotalAmount();
+    if (gross == null) {
+      return;
+    }
+    List<FIN_PaymentSchedule> invSchedules = invoice.getFINPaymentScheduleList();
+    if (invSchedules == null || invSchedules.isEmpty()) {
+      return;
+    }
+    FIN_PaymentSchedule invSch = invSchedules.get(0);
+    BigDecimal prepayment = invoice.getPrepaymentamt() != null ? invoice.getPrepaymentamt()
+        : BigDecimal.ZERO;
+    // When PSD rows already have fin_payment_detail_id, FIN_PaymentProcess updated (or will have
+    // updated) schedule line amounts; avoid overwriting schedule totals only in that case. C_Invoice
+    // monitor is still aligned from our POS payments below.
+    boolean planHasPaymentDetails = invoicePaymentPlanHasLinkedPaymentDetails(invSch);
+    if (!planHasPaymentDetails) {
+      invSch.setPaidAmount(sumPaid);
+      invSch.setOutstandingAmount(gross.subtract(sumPaid));
+      OBDal.getInstance().save(invSch);
+    }
+
+    invoice.setTotalPaid(sumPaid);
+    invoice.setOutstandingAmount(gross.subtract(sumPaid));
+    invoice.setDueAmount(gross.subtract(sumPaid));
+    invoice.setPaymentComplete(sumPaid.compareTo(gross) == 0);
+    invoice.setLastCalculatedOnDate(new Date());
+    invoice.setPaidAmountAtInvoicing(sumPaid.subtract(prepayment));
+    OBDal.getInstance().save(invoice);
+  }
+
+  /**
+   * True when at least one invoice PSD row has FIN_Payment_Detail set (what the UI uses for
+   * "Number of Payments" and the Payment Details subtab).
+   */
+  private boolean invoicePaymentPlanHasLinkedPaymentDetails(FIN_PaymentSchedule invoiceSchedule) {
+    if (invoiceSchedule == null) {
+      return false;
+    }
+    List<FIN_PaymentScheduleDetail> list = invoiceSchedule
+        .getFINPaymentScheduleDetailInvoicePaymentScheduleList();
+    if (list == null) {
+      return false;
+    }
+    for (FIN_PaymentScheduleDetail psd : list) {
+      if (psd != null && psd.getPaymentDetails() != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The invoice Payment Plan subtab lists {@link FIN_PaymentScheduleDetail} rows where
+   * {@code fin_payment_schedule_invoice} is set and {@code fin_payment_detail_id} is not null.
+   * The same PSD row must reference both order and invoice schedules (retail / OrderLoader model).
+   */
+  private void applyInvoiceScheduleToPsdIfNeeded(FIN_PaymentScheduleDetail psd,
+      FIN_PaymentSchedule invoiceSchedule) {
+    if (psd == null || invoiceSchedule == null) {
+      return;
+    }
+    if (psd.getInvoicePaymentSchedule() == null) {
+      psd.setInvoicePaymentSchedule(invoiceSchedule);
+      OBDal.getInstance().save(psd);
+    }
+  }
+
+  /**
+   * After {@link FIN_AddPayment#savePayment}, ensure each paid PSD row is linked to the invoice
+   * payment schedule so the invoice document shows Payment Details (not only the sales order).
+   */
+  private void ensureInvoicePaymentPlanSharesSavedPaymentDetails(FIN_Payment payment,
+      FIN_PaymentSchedule invoiceSchedule) {
+    if (payment == null || invoiceSchedule == null) {
+      return;
+    }
+    OBDal.getInstance().refresh(payment);
+    boolean changed = false;
+    for (FIN_PaymentDetail pd : payment.getFINPaymentDetailList()) {
+      if (pd == null) {
+        continue;
+      }
+      for (FIN_PaymentScheduleDetail psd : pd.getFINPaymentScheduleDetailList()) {
+        if (psd != null && psd.getOrderPaymentSchedule() != null
+            && psd.getInvoicePaymentSchedule() == null) {
+          psd.setInvoicePaymentSchedule(invoiceSchedule);
+          OBDal.getInstance().save(psd);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
       OBDal.getInstance().flush();
     }
   }
 
   private FIN_PaymentScheduleDetail resolveOrCreateOutstandingOrderPSD(FIN_PaymentSchedule paymentSchedule,
-      Order order, BigDecimal paymentAmount) {
+      Order order, BigDecimal paymentAmount, FIN_PaymentSchedule invoiceSchedule) {
     OBDal.getInstance().refresh(paymentSchedule);
     List<FIN_PaymentScheduleDetail> psdList = paymentSchedule
         .getFINPaymentScheduleDetailOrderPaymentScheduleList();
@@ -559,6 +752,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
           continue;
         }
         if (psd.getAmount().abs().compareTo(paymentAmount.abs()) == 0) {
+          applyInvoiceScheduleToPsdIfNeeded(psd, invoiceSchedule);
           return psd;
         }
         if (firstOutstanding == null) {
@@ -567,14 +761,17 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       }
     }
     if (firstOutstanding != null) {
+      applyInvoiceScheduleToPsdIfNeeded(firstOutstanding, invoiceSchedule);
       return firstOutstanding;
     }
     BigDecimal psdAmount = paymentAmount;
     if (paymentSchedule.getAmount() != null && paymentSchedule.getAmount().signum() < 0) {
       psdAmount = paymentAmount.negate();
     }
-    return FIN_AddPayment.createPSD(psdAmount, paymentSchedule, null, order.getOrganization(),
-        order.getBusinessPartner());
+    // Same PSD row must reference the invoice plan when an invoice exists, or the invoice Payment
+    // Plan shows 0 payments / empty details (computed column joins via fin_payment_schedule_invoice).
+    return FIN_AddPayment.createPSD(psdAmount, paymentSchedule, invoiceSchedule,
+        order.getOrganization(), order.getBusinessPartner());
   }
 
   private FIN_PaymentSchedule createOrReuseOrderPaymentSchedule(Order order) {
@@ -713,7 +910,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       return null;
     }
 
-    PaymentResolution terminalMapping = resolvePaymentFromTerminal(kind, ctx.terminalSearchKey);
+    PaymentResolution terminalMapping = resolvePaymentFromTerminal(kind, ctx.terminal);
     if (terminalMapping != null) {
       return terminalMapping;
     }
@@ -735,37 +932,161 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     return new PaymentResolution(method, fapm.getAccount());
   }
 
-  private PaymentResolution resolvePaymentFromTerminal(String kind, String terminalSearchKey)
-      throws Exception {
-    if (StringUtils.isBlank(terminalSearchKey)) {
+  /**
+   * OrderLoader creates one outstanding PSD for the gross total before the payment loop (unless
+   * layaway / isPaid). Without this, the first PSD is only created inside
+   * {@link #resolveOrCreateOutstandingOrderPSD} and was not flushed before
+   * {@link FIN_AddPayment#savePayment}, which calls {@code refresh} on the PSD.
+   */
+  private void ensureInitialOutstandingPsdLikeOrderLoader(Order order, JSONObject orderJson,
+      FIN_PaymentSchedule orderSchedule) {
+    if (orderJson.optBoolean("isLayaway", false) || orderJson.optBoolean("isPaid", false)) {
+      return;
+    }
+    OBCriteria<FIN_PaymentScheduleDetail> c = OBDal.getInstance()
+        .createCriteria(FIN_PaymentScheduleDetail.class);
+    c.add(Restrictions.eq(FIN_PaymentScheduleDetail.PROPERTY_ORDERPAYMENTSCHEDULE, orderSchedule));
+    c.add(Restrictions.isNull(FIN_PaymentScheduleDetail.PROPERTY_PAYMENTDETAILS));
+    c.setFilterOnReadableOrganization(false);
+    if (!c.list().isEmpty()) {
+      return;
+    }
+    BigDecimal gross = order.getGrandTotalAmount();
+    if (gross == null || gross.compareTo(BigDecimal.ZERO) == 0) {
+      return;
+    }
+    FIN_AddPayment.createPSD(gross, orderSchedule, null, order.getOrganization(),
+        order.getBusinessPartner());
+  }
+
+  /**
+   * Same resolution as OrderLoader.handlePayments: {@code kind} is the OBPOS_App_Payment
+   * {@code Value} (search key), e.g. {@code OBPOS_payment.cash}, not a UUID. The previous SQL
+   * compared {@code obpos_app_payment_id} to {@code kind}, which is invalid and prevented payments.
+   */
+  private PaymentResolution resolvePaymentFromTerminal(String kind, OBPOSApplications terminal) {
+    if (terminal == null || StringUtils.isBlank(kind)) {
       return null;
     }
+    OBCriteria<OBPOSAppPayment> obc = OBDal.getInstance().createCriteria(OBPOSAppPayment.class);
+    obc.add(Restrictions.eq(OBPOSAppPayment.PROPERTY_SEARCHKEY, kind));
+    obc.add(Restrictions.eq(OBPOSAppPayment.PROPERTY_OBPOSAPPLICATIONS, terminal));
+    obc.setFilterOnActive(false);
+    obc.setMaxResults(1);
+    OBPOSAppPayment appPayment = (OBPOSAppPayment) obc.uniqueResult();
+    if (appPayment == null || appPayment.getFinancialAccount() == null) {
+      return null;
+    }
+    TerminalTypePaymentMethod terminalType = appPayment.getPaymentMethod();
+    if (terminalType == null || terminalType.getPaymentMethod() == null) {
+      return null;
+    }
+    return new PaymentResolution(terminalType.getPaymentMethod(), appPayment.getFinancialAccount());
+  }
 
-    Connection conn = OBDal.getInstance().getConnection();
-    String sql = "select t.fin_paymentmethod_id, p.fin_financial_account_id "
-        + "from obpos_app_payment p "
-        + "join obpos_app_payment_type t on t.obpos_app_payment_type_id = p.obpos_app_payment_type_id "
-        + "join obpos_applications a on a.obpos_applications_id = p.obpos_applications_id "
-        + "where p.isactive = 'Y' and a.value = ? and (p.obpos_app_payment_id = ? or p.value = ?) "
-        + "order by p.line nulls last";
-
-    try (PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setString(1, terminalSearchKey);
-      ps.setString(2, kind);
-      ps.setString(3, kind);
-      try (ResultSet rs = ps.executeQuery()) {
-        if (!rs.next()) {
-          return null;
-        }
-        FIN_PaymentMethod method = OBDal.getInstance()
-            .get(FIN_PaymentMethod.class, rs.getString(1));
-        FIN_FinancialAccount account = OBDal.getInstance()
-            .get(FIN_FinancialAccount.class, rs.getString(2));
-        if (method == null || account == null) {
-          return null;
-        }
-        return new PaymentResolution(method, account);
+  /**
+   * Links order PSD rows to the invoice payment schedule (same row as retail / OrderLoader). Removes
+   * invoice-only placeholder PSD rows (no order link, no payment detail) so the invoice plan does not
+   * show duplicate lines with empty Payment Details.
+   *
+   * @return the invoice {@link FIN_PaymentSchedule} used for PSD linking, or null if no invoice
+   */
+  private FIN_PaymentSchedule linkOrderPsdToInvoicePaymentScheduleIfInvoiceExists(Order order,
+      FIN_PaymentSchedule orderSchedule) {
+    if (orderSchedule == null) {
+      return null;
+    }
+    OBCriteria<Invoice> invCrit = OBDal.getInstance().createCriteria(Invoice.class);
+    invCrit.add(Restrictions.eq(Invoice.PROPERTY_SALESORDER, order));
+    invCrit.setMaxResults(1);
+    Invoice invoice = (Invoice) invCrit.uniqueResult();
+    if (invoice == null) {
+      return null;
+    }
+    OBDal.getInstance().refresh(invoice);
+    OBDal.getInstance().refresh(order);
+    BigDecimal gross = invoice.getGrandTotalAmount();
+    if (gross == null || gross.compareTo(BigDecimal.ZERO) == 0) {
+      gross = order.getGrandTotalAmount();
+    }
+    if (gross == null || gross.compareTo(BigDecimal.ZERO) == 0) {
+      return null;
+    }
+    if (invoice.getGrandTotalAmount() == null
+        || invoice.getGrandTotalAmount().compareTo(BigDecimal.ZERO) == 0) {
+      invoice.setGrandTotalAmount(gross);
+      if (order.getSummedLineAmount() != null) {
+        invoice.setSummedLineAmount(order.getSummedLineAmount());
       }
+      OBDal.getInstance().save(invoice);
+    }
+    FIN_PaymentSchedule invoiceSchedule;
+    List<FIN_PaymentSchedule> invSchedules = invoice.getFINPaymentScheduleList();
+    if (invSchedules != null && !invSchedules.isEmpty()) {
+      invoiceSchedule = invSchedules.get(0);
+    } else {
+      invoiceSchedule = OBProvider.getInstance().get(FIN_PaymentSchedule.class);
+      invoiceSchedule.setOrganization(invoice.getOrganization());
+      invoiceSchedule.setCurrency(order.getCurrency());
+      invoiceSchedule.setInvoice(invoice);
+      invoiceSchedule.setFinPaymentmethod(order.getPaymentMethod());
+      invoiceSchedule.setAmount(gross);
+      invoiceSchedule.setOutstandingAmount(gross);
+      invoiceSchedule.setDueDate(order.getOrderDate());
+      invoiceSchedule.setExpectedDate(order.getOrderDate());
+      if (order.getFINPaymentPriority() != null) {
+        invoiceSchedule.setFINPaymentPriority(order.getFINPaymentPriority());
+      }
+      if (ModelProvider.getInstance().getEntity(FIN_PaymentSchedule.class).hasProperty("origDueDate")) {
+        invoiceSchedule.set("origDueDate", invoiceSchedule.getDueDate());
+      }
+      invoice.getFINPaymentScheduleList().add(invoiceSchedule);
+      OBDal.getInstance().save(invoiceSchedule);
+    }
+
+    removeOrphanInvoiceOnlyPsdPlaceholders(invoiceSchedule);
+
+    OBCriteria<FIN_PaymentScheduleDetail> psdCrit = OBDal.getInstance()
+        .createCriteria(FIN_PaymentScheduleDetail.class);
+    psdCrit.add(
+        Restrictions.eq(FIN_PaymentScheduleDetail.PROPERTY_ORDERPAYMENTSCHEDULE, orderSchedule));
+    psdCrit.add(Restrictions.isNull(FIN_PaymentScheduleDetail.PROPERTY_PAYMENTDETAILS));
+    psdCrit.add(Restrictions.isNull(FIN_PaymentScheduleDetail.PROPERTY_INVOICEPAYMENTSCHEDULE));
+    psdCrit.setFilterOnReadableOrganization(false);
+    for (FIN_PaymentScheduleDetail psd : psdCrit.list()) {
+      psd.setInvoicePaymentSchedule(invoiceSchedule);
+      OBDal.getInstance().save(psd);
+    }
+    OBDal.getInstance().save(invoiceSchedule);
+    OBDal.getInstance().save(invoice);
+    return invoiceSchedule;
+  }
+
+  /**
+   * Triggers / APR can create invoice PSD rows with only {@code fin_payment_schedule_invoice} set.
+   * Those compete with the shared order+invoice PSD and never receive {@code fin_payment_detail_id},
+   * which yields "Number of Payments: 0" and an empty Payment Details tab.
+   */
+  private void removeOrphanInvoiceOnlyPsdPlaceholders(FIN_PaymentSchedule invoiceSchedule) {
+    if (invoiceSchedule == null) {
+      return;
+    }
+    List<FIN_PaymentScheduleDetail> invoicePsdList = invoiceSchedule
+        .getFINPaymentScheduleDetailInvoicePaymentScheduleList();
+    if (invoicePsdList == null || invoicePsdList.isEmpty()) {
+      return;
+    }
+    for (FIN_PaymentScheduleDetail psd : new ArrayList<>(invoicePsdList)) {
+      if (psd == null) {
+        continue;
+      }
+      if (psd.getOrderPaymentSchedule() != null) {
+        continue;
+      }
+      if (psd.getPaymentDetails() != null) {
+        continue;
+      }
+      OBDal.getInstance().remove(psd);
     }
   }
 

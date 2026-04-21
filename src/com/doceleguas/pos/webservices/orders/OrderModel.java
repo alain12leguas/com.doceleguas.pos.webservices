@@ -110,6 +110,11 @@ public class OrderModel extends Model {
   /**
    * Retrieves the order lines (receiptLines) for the given order. Each line includes taxes and
    * promotions arrays. Equivalent to PaidReceipts.receiptLines.
+   * <p>
+   * Per-line amounts follow Openbravo {@code c_orderline}: {@code unitPrice} is the <strong>net</strong>
+   * unit ({@code priceactual}); {@code grossUnitPrice} is {@code line_gross_amount / qtyordered} when
+   * quantity is non-zero. Consumers that display or price on a gross tax-included basis should use
+   * {@code grossUnitPrice} (or {@code lineGrossAmount}) rather than {@code unitPrice}.
    * 
    * @param orderId
    *          The order UUID
@@ -134,6 +139,8 @@ public class OrderModel extends Model {
         + "ol.pricelist as \"listPrice\", "
         + "ol.linenetamt as \"lineNetAmount\", " 
         + "ol.line_gross_amount as \"lineGrossAmount\", "
+        + "CASE WHEN COALESCE(ol.qtyordered, 0) <> 0 "
+        + "THEN ol.line_gross_amount / NULLIF(ol.qtyordered, 0) ELSE NULL END as \"grossUnitPrice\", "
         + "ol.c_tax_id as \"tax\", " 
         + "ol.updated as \"loaded\", " 
         + "t.name as \"taxName\", "

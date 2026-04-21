@@ -209,6 +209,10 @@ public class OcreNativeStandardDocumentsService {
     OBContext.setAdminMode(false);
     TriggerHandler.getInstance().disable();
     try {
+      // Persist order lines and reload header totals before copying to C_Invoice (otherwise
+      // grand total can still be 0 and downstream PSD→invoice linking is skipped).
+      OBDal.getInstance().flush();
+      OBDal.getInstance().refresh(order);
       DocumentType invDocType = getInvoiceDocumentType(order.getDocumentType(), true);
       Invoice invoice = OBProvider.getInstance().get(Invoice.class);
       invoice.setOrganization(order.getOrganization());

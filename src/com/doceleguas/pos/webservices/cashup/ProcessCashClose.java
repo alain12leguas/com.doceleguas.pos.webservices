@@ -27,13 +27,13 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
-import org.openbravo.retail.posterminal.CashCloseProcessor;
-import org.openbravo.retail.posterminal.CashupHook;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.OrderGroupingProcessor;
-import org.openbravo.retail.posterminal.UpdateCashup;
 import org.openbravo.service.db.DbUtility;
+import org.openbravo.retail.posterminal.CashupHook;
+import com.doceleguas.pos.webservices.cashup.engine.CashCloseProcessor;
+import com.doceleguas.pos.webservices.cashup.engine.OrderGroupingProcessor;
+import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
 import org.openbravo.service.web.WebService;
 
 /**
@@ -42,9 +42,10 @@ import org.openbravo.service.web.WebService;
  * <p>This is the equivalent of
  * {@code org.openbravo.retail.posterminal.process.ProcessCashClose}
  * (JSONProcessSimple) but exposed as a standard WebService endpoint.
- * All lookup/filter queries use native SQL (PreparedStatement). Openbravo
- * infrastructure calls (UpdateCashup, CashCloseProcessor, OrderGroupingProcessor,
- * CashupHook) are preserved as they require DAL entity objects.</p>
+ * All lookup/filter queries use native SQL (PreparedStatement). Cash logic runs in
+ * {@link com.doceleguas.pos.webservices.cashup.engine} (UpdateCashup, CashCloseProcessor,
+ * OrderGroupingProcessor); CDI hooks use {@link org.openbravo.retail.posterminal.CashupHook},
+ * and OBPOS_* entities remain from the Web POS module.</p>
  *
  * <h3>POST JSON Body:</h3>
  * <pre>{@code
@@ -172,8 +173,8 @@ public class ProcessCashClose implements WebService {
         accumulateSlavePaymentMethods(conn, cashUpId, slaveCashupIds);
       }
 
-      // 7. Group orders — Openbravo utility (requires entity objects)
-      OrderGroupingProcessor orderGrouping = new OrderGroupingProcessor();
+      // 7. Group orders — engine (CDI-managed for InvoiceUtils / FinishInvoiceHook)
+      OrderGroupingProcessor orderGrouping = CDI.current().select(OrderGroupingProcessor.class).get();
       JSONObject orderGroupResult = orderGrouping.groupOrders(posTerminal, cashUpId, cashUpDate);
 
       // 8. Execute CashupHook pre-processing via CDI
@@ -189,8 +190,8 @@ public class ProcessCashClose implements WebService {
         log.warn("Error executing CashupHook: {}", hookEx.getMessage());
       }
 
-      // 9. Process the cash close — Openbravo infrastructure (requires entity objects)
-      CashCloseProcessor processor = new CashCloseProcessor();
+      // 9. Process the cash close — CDI-managed for CashupHook injection
+      CashCloseProcessor processor = CDI.current().select(CashCloseProcessor.class).get();
       JSONObject closeResult = processor.processCashClose(
           posTerminal, jsonCashup, cashMgmtIds, cashUpDate, slaveCashupIds);
 

@@ -20,7 +20,7 @@ import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.UpdateCashup;
+import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
