@@ -80,7 +80,9 @@ public class OCTaxZone extends Model {
 
     sql += " ORDER BY e.C_Tax_Zone_ID ASC ";
     sql += " LIMIT :limit ";
-
+    if (offset > 0) {
+      sql += " OFFSET :offset";
+    }
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
 
@@ -97,7 +99,7 @@ public class OCTaxZone extends Model {
     if (fromRegion != null) {
       query.setParameter("regionId", fromRegion.getId());
     }
-    if (offset != 0) {
+    if (offset > 0) {
       query.setParameter("offset", offset);
     }
     return query;
