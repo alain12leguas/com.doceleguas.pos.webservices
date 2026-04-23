@@ -25,8 +25,8 @@ import org.openbravo.model.ad.access.Role;
 import org.openbravo.model.ad.access.User;
 import org.openbravo.model.ad.system.Language;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.POSDefaults;
 
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosWebDefaults;
 import com.doceleguas.pos.webservices.utils.WebServiceUtils;
 import com.doceleguas.pos.webservices.utils.WebServiceUtils.TerminalAuthenticationException;
 
@@ -156,7 +156,7 @@ public class Login extends OCPOSLoginHandler {
 
   private JSONArray getRoles() throws JSONException {
     OCProfile profile = new OCProfile();
-    final List<Role> roles = profile.getRoles(new POSDefaults());
+    final List<Role> roles = profile.getRoles(new OcrePosWebDefaults());
     JSONArray rolesArray = new JSONArray();
     for (Role role : roles) {
       final JSONObject jsonRole = new JSONObject();

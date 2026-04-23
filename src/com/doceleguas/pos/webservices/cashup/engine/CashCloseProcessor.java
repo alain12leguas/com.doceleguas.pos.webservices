@@ -10,8 +10,6 @@ package com.doceleguas.pos.webservices.cashup.engine;
 
 import javax.enterprise.context.Dependent;
 
-import org.openbravo.retail.posterminal.CashupHook;
-import org.openbravo.retail.posterminal.CashupHookResult;
 import org.openbravo.retail.posterminal.OBPOSAppCashReconcil;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSAppPayment;
@@ -24,8 +22,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-import javax.enterprise.inject.Any;
-import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
 
 import org.apache.logging.log4j.LogManager;
@@ -56,14 +52,15 @@ import org.openbravo.service.db.CallStoredProcedure;
 import org.openbravo.service.db.DalConnectionProvider;
 import org.openbravo.service.json.JsonConstants;
 
+import com.doceleguas.pos.webservices.spi.OcreCashupCloseHookAggregator;
+
 @Dependent
 public class CashCloseProcessor {
 
   private static final Logger logger = LogManager.getLogger();
 
   @Inject
-  @Any
-  private Instance<CashupHook> cashupHooks;
+  private OcreCashupCloseHookAggregator cashupCloseHookAggregator;
 
   public JSONObject processCashClose(OBPOSApplications posTerminal, JSONObject jsonCashup,
       JSONArray cashMgmtIds, Date cashUpDate) throws Exception {
@@ -220,19 +217,7 @@ public class CashCloseProcessor {
 
   private String executeHooks(JSONArray messages, OBPOSApplications posTerminal,
       OBPOSAppCashup cashUp, JSONObject jsonCashup) throws Exception {
-    String next = null; // the first next action of all hooks wins
-    for (CashupHook hook : cashupHooks) {
-      CashupHookResult result = hook.exec(posTerminal, cashUp, jsonCashup);
-      if (result != null) {
-        if (result.getMessage() != null && !result.getMessage().equals("")) {
-          messages.put(result.getMessage());
-        }
-        if (next == null && result.getNextAction() != null && !result.getNextAction().equals("")) {
-          next = result.getNextAction();
-        }
-      }
-    }
-    return next;
+    return cashupCloseHookAggregator.runAll(messages, posTerminal, cashUp, jsonCashup);
   }
 
   private void associateTransactions(OBPOSAppPayment paymentType, FIN_Reconciliation reconciliation,

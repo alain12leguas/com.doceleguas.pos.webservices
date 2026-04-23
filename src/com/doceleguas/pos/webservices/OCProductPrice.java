@@ -11,9 +11,9 @@ import org.hibernate.transform.Transformers;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.model.pricing.pricelist.PriceList;
-import org.openbravo.retail.config.OBRETCOProductList;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.POSUtils;
+
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 /**
  * Backend model for ProductPrice masterdata.
@@ -34,11 +34,11 @@ public class OCProductPrice extends Model {
     String lastId = jsonParams.optString("lastId", null);
     String lastUpdated = jsonParams.optString("lastUpdated", null);
     String selectList = jsonParams.getString("selectList");
-    OBPOSApplications posterminal = POSUtils.getTerminalById(jsonParams.getString("pos"));
-    OBRETCOProductList productList = POSUtils
-        .getProductListByPosterminalId(jsonParams.getString("pos"));
+    OBPOSApplications posterminal = OcrePosTerminalSupport.getTerminalById(jsonParams.getString("pos"));
+    String productListId = OcrePosTerminalSupport
+        .getProductListIdForPosterminalId(jsonParams.getString("pos"));
 
-    PriceList pricelist = POSUtils.getPriceListByTerminal(posterminal.getSearchKey());
+    PriceList pricelist = OcrePosTerminalSupport.getPriceListByTerminal(posterminal.getSearchKey());
     String sql = "SELECT DISTINCT " + selectList //
         + "FROM OBRETCO_Prol_Product pli " //
         + "INNER JOIN M_ProductPrice ppp ON pli.M_Product_ID = ppp.M_Product_ID " //
@@ -83,7 +83,7 @@ public class OCProductPrice extends Model {
             OBContext.getOBContext()
                 .getOrganizationStructureProvider()
                 .getNaturalTree(jsonParams.getString("organization")))
-        .setParameter("productList", productList.getId())
+        .setParameter("productList", productListId)
         .setParameter("priceList", pricelist.getId())
         .setParameter("terminalDate", terminalDate)
         .setParameter("limit", limit);

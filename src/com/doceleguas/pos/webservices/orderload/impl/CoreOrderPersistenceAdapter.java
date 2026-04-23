@@ -74,6 +74,7 @@ import org.openbravo.service.db.DalConnectionProvider;
 import org.openbravo.service.json.JsonConstants;
 
 import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 import com.doceleguas.pos.webservices.orderload.OrderFlowType;
 import com.doceleguas.pos.webservices.orderload.OrderFlowUtils;
 import com.doceleguas.pos.webservices.orderload.spi.OrderPersistencePort;
@@ -115,7 +116,12 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       OrderCreationResult orderResult = createOrReuseOrder(orderJson, terminalContext);
       Order order = orderResult.order;
       if (orderResult.duplicate) {
-        // Existing order found by documentNo+org. Keep idempotency.
+        // Idempotent re-import: order already in DB, but the terminal may still be behind
+        // (e.g. first import never updated sequences, or only duplicate paths ran). Bumping
+        // last* sequence with max(terminal, payload) is safe and fixes duplicate documentNo
+        // generation on the next POS load.
+        OcrePosTerminalSupport.applyReportedDocumentSequences(terminalContext.terminal, orderJson);
+        OBDal.getInstance().flush();
         processedOrders.put(successOrderJson(order, true));
         continue;
       }
@@ -141,6 +147,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         createBasicPayments(orderJson, order, terminalContext);
       }
       OBDal.getInstance().flush();
+
+      OcrePosTerminalSupport.applyReportedDocumentSequences(terminalContext.terminal, orderJson);
 
       processedOrders.put(successOrderJson(order, false));
     }
@@ -210,6 +218,33 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     return json;
   }
 
+  /**
+   * Persists order-level POS document sequence metadata (retail
+   * {@code em_obpos_sequencename} / {@code em_obpos_sequencenumber} on {@link Order}).
+   */
+  private void applyObposSequenceToOrderFromPayload(Order order, JSONObject orderJson) {
+    if (orderJson == null) {
+      return;
+    }
+    if (orderJson.has("obposSequencename") && !orderJson.isNull("obposSequencename")) {
+      String name = orderJson.optString("obposSequencename", null);
+      if (StringUtils.isNotBlank(name)) {
+        order.setObposSequencename(name);
+      }
+    }
+    if (orderJson.has("obposSequencenumber") && !orderJson.isNull("obposSequencenumber")) {
+      long n;
+      try {
+        n = orderJson.getLong("obposSequencenumber");
+      } catch (Exception e) {
+        n = orderJson.optLong("obposSequencenumber", 0L);
+      }
+      if (n > 0) {
+        order.setObposSequencenumber(n);
+      }
+    }
+  }
+
   private void ensureSupportedOrderFlow(JSONObject orderJson) throws Exception {
     String step = OrderFlowUtils.resolveStep(orderJson);
     if (!"create".equalsIgnoreCase(step) && !"all".equalsIgnoreCase(step)
@@ -257,6 +292,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     order.setOrderDate(orderDate);
     order.setWarehouse(warehouse);
     order.setObposApplications(ctx.terminal);
+    applyObposSequenceToOrderFromPayload(order, orderJson);
     order.setBusinessPartner(bp);
     order.setPartnerAddress(bpLocation);
     order.setPriceList(priceList);

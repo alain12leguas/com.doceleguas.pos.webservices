@@ -14,7 +14,7 @@ import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.Transformers;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
-import org.openbravo.retail.posterminal.POSUtils;
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 public class OCProductMulti extends Model {
   private static final Logger log = LogManager.getLogger();
@@ -37,8 +37,9 @@ public class OCProductMulti extends Model {
     String organization = jsonParams.getString("organization");
 
     terminalDate = new Date();
-    productListId = POSUtils.getProductListByPosterminalId(posId).getId();
-    priceListVersionId = POSUtils.getPriceListVersionByOrgId(organization, terminalDate).getId();
+    productListId = OcrePosTerminalSupport.getProductListIdForPosterminalId(posId);
+    priceListVersionId = OcrePosTerminalSupport.getPriceListVersionByOrgId(organization, terminalDate)
+        .getId();
     orgId = OBContext.getOBContext().getCurrentOrganization().getId();
 
     queries.add(createRegularProductsQuery(jsonParams));

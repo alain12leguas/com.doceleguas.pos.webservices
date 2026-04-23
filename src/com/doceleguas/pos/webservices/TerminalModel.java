@@ -24,7 +24,8 @@ import org.openbravo.dal.service.OBDal;
 import org.openbravo.erpCommon.businessUtility.Preferences;
 import org.openbravo.erpCommon.utility.PropertyException;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.POSUtils;
+
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 /**
  * Native SQL query builder for Terminal configuration data. Returns only the requested fields based
@@ -56,28 +57,28 @@ public class TerminalModel {
       sessionTimeout = 0;
     }
 
-    org.openbravo.model.pricing.pricelist.PriceList priceList = POSUtils
+    org.openbravo.model.pricing.pricelist.PriceList priceList = OcrePosTerminalSupport
         .getPriceListByTerminalId(terminal.getId());
 
-    final int lastDocumentNumber = POSUtils
+    final int lastDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "lastassignednum", false)
         .intValue();
-    final int lastQuotationDocumentNumber = POSUtils
+    final int lastQuotationDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "quotationslastassignednum", false)
         .intValue();
-    final int lastReturnDocumentNumber = POSUtils
+    final int lastReturnDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "returnslastassignednum", false)
         .intValue();
-    final int lastFullInvoiceDocumentNumber = POSUtils
+    final int lastFullInvoiceDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "fullinvoiceslastassignednum", true)
         .intValue();
-    final int lastFullReturnInvoiceDocumentNumber = POSUtils
+    final int lastFullReturnInvoiceDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "fullreturninvoiceslastassignednum", true)
         .intValue();
-    final int lastSimplifiedInvoiceDocumentNumber = POSUtils
+    final int lastSimplifiedInvoiceDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "simplifiedinvoiceslastassignednum", true)
         .intValue();
-    final int lastSimplifiedReturnInvoiceDocumentNumber = POSUtils
+    final int lastSimplifiedReturnInvoiceDocumentNumber = OcrePosTerminalSupport
         .getLastTerminalDocumentSequence(terminal, "simplifiedreturninvoiceslastassignednum", true)
         .intValue();
 

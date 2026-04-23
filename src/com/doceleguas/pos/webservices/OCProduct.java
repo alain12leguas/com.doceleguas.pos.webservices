@@ -10,7 +10,7 @@ import org.hibernate.query.NativeQuery;
 import org.hibernate.transform.Transformers;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.mobile.core.utils.OBMOBCUtils;
-import org.openbravo.retail.posterminal.POSUtils;
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 public class OCProduct extends Model {
   private static final Logger log = LogManager.getLogger();
@@ -55,8 +55,9 @@ public class OCProduct extends Model {
     final Date terminalDate = new Date();
     String organization = jsonParams.getString("organization");
     final String posId = getTerminalId(jsonParams);
-    final String productListId = POSUtils.getProductListByPosterminalId(posId).getId();
-    final String priceListVersionId = POSUtils.getPriceListVersionByOrgId(organization, terminalDate)
+    final String productListId = OcrePosTerminalSupport.getProductListIdForPosterminalId(posId);
+    final String priceListVersionId = OcrePosTerminalSupport
+        .getPriceListVersionByOrgId(organization, terminalDate)
         .getId();
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(sql);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);

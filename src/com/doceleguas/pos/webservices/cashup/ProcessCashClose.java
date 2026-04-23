@@ -30,10 +30,11 @@ import org.openbravo.dal.service.OBDal;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSApplications;
 import org.openbravo.service.db.DbUtility;
-import org.openbravo.retail.posterminal.CashupHook;
+
 import com.doceleguas.pos.webservices.cashup.engine.CashCloseProcessor;
 import com.doceleguas.pos.webservices.cashup.engine.OrderGroupingProcessor;
 import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
+import com.doceleguas.pos.webservices.spi.OcreCashupPreCloseHooks;
 import org.openbravo.service.web.WebService;
 
 /**
@@ -44,8 +45,9 @@ import org.openbravo.service.web.WebService;
  * (JSONProcessSimple) but exposed as a standard WebService endpoint.
  * All lookup/filter queries use native SQL (PreparedStatement). Cash logic runs in
  * {@link com.doceleguas.pos.webservices.cashup.engine} (UpdateCashup, CashCloseProcessor,
- * OrderGroupingProcessor); CDI hooks use {@link org.openbravo.retail.posterminal.CashupHook},
- * and OBPOS_* entities remain from the Web POS module.</p>
+ * OrderGroupingProcessor); extension hooks are invoked via {@link com.doceleguas.pos.webservices.spi.OcreCashupPreCloseHooks}
+ * (default: {@link com.doceleguas.pos.webservices.retailcompat.RetailOcreCashupPreCloseHooksImpl}).
+ * OBPOS_* entities remain DAL types from the Web POS module.</p>
  *
  * <h3>POST JSON Body:</h3>
  * <pre>{@code
@@ -173,24 +175,19 @@ public class ProcessCashClose implements WebService {
         accumulateSlavePaymentMethods(conn, cashUpId, slaveCashupIds);
       }
 
-      // 7. Group orders — engine (CDI-managed for InvoiceUtils / FinishInvoiceHook)
+      // 7. Group orders — engine (InvoiceUtils; finish-invoice hooks via OcreFinishInvoiceHookRunner)
       OrderGroupingProcessor orderGrouping = CDI.current().select(OrderGroupingProcessor.class).get();
       JSONObject orderGroupResult = orderGrouping.groupOrders(posTerminal, cashUpId, cashUpDate);
 
-      // 8. Execute CashupHook pre-processing via CDI
+      // 8. Execute CashupHook pre-processing via SPI (retail hooks in retailcompat impl)
       try {
-        javax.enterprise.inject.Instance<CashupHook> hooks =
-            CDI.current().select(CashupHook.class);
-        if (hooks != null) {
-          for (CashupHook hook : hooks) {
-            hook.exec(posTerminal, cashup, jsonCashup);
-          }
-        }
+        OcreCashupPreCloseHooks preHooks = CDI.current().select(OcreCashupPreCloseHooks.class).get();
+        preHooks.runAll(posTerminal, cashup, jsonCashup);
       } catch (Exception hookEx) {
-        log.warn("Error executing CashupHook: {}", hookEx.getMessage());
+        log.warn("Error executing OcreCashupPreCloseHooks: {}", hookEx.getMessage());
       }
 
-      // 9. Process the cash close — CDI-managed for CashupHook injection
+      // 9. Process the cash close — uses OcreCashupCloseHookAggregator inside CashCloseProcessor
       CashCloseProcessor processor = CDI.current().select(CashCloseProcessor.class).get();
       JSONObject closeResult = processor.processCashClose(
           posTerminal, jsonCashup, cashMgmtIds, cashUpDate, slaveCashupIds);

@@ -10,7 +10,7 @@ import org.hibernate.transform.Transformers;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.model.pricing.pricelist.PriceList;
-import org.openbravo.retail.posterminal.POSUtils;
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 /* TODO: Check  that exists this indexes:
  * m_offer_pricelist: (m_offer_id, m_pricelist_id, isactive)
@@ -158,7 +158,7 @@ public class OCDiscount extends Model {
     sql.append(" LIMIT :limit ");
 
     String finalQuery = sql.toString();
-    PriceList priceList = POSUtils.getPriceListByOrgId(organization);
+    PriceList priceList = OcrePosTerminalSupport.getPriceListByOrgId(organization);
     NativeQuery<?> query = OBDal.getInstance().getSession().createNativeQuery(finalQuery);
     query.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
     query.setParameter("clientId", client)

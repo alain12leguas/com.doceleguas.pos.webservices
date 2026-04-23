@@ -10,7 +10,6 @@ package com.doceleguas.pos.webservices.cashup.engine;
 
 import javax.enterprise.context.Dependent;
 
-import org.openbravo.retail.posterminal.FinishInvoiceHook;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSApplications;
 import org.openbravo.retail.posterminal.TerminalType;
@@ -21,11 +20,8 @@ import java.sql.SQLException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Iterator;
 import java.util.List;
 
-import javax.enterprise.inject.Any;
-import javax.enterprise.inject.Instance;
 import javax.inject.Inject;
 import javax.servlet.ServletException;
 
@@ -66,6 +62,7 @@ import org.openbravo.model.financialmgmt.payment.FIN_PaymentSchedule;
 import org.openbravo.model.financialmgmt.payment.FIN_PaymentScheduleDetail;
 import org.openbravo.model.materialmgmt.transaction.ShipmentInOutLine;
 import com.doceleguas.pos.webservices.cashup.engine.utility.InvoiceUtils;
+import com.doceleguas.pos.webservices.spi.OcreFinishInvoiceHookRunner;
 import org.openbravo.service.db.DalConnectionProvider;
 import org.openbravo.service.json.JsonConstants;
 
@@ -73,8 +70,7 @@ import org.openbravo.service.json.JsonConstants;
 public class OrderGroupingProcessor {
 
   @Inject
-  @Any
-  private Instance<FinishInvoiceHook> invoiceProcesses;
+  private OcreFinishInvoiceHookRunner finishInvoiceHookRunner;
 
   @Inject
   private InvoiceUtils iu;
@@ -315,11 +311,7 @@ public class OrderGroupingProcessor {
   }
 
   private void executeHooks(Invoice invoice, String cashUpId) {
-    for (Iterator<FinishInvoiceHook> processIterator = invoiceProcesses.iterator(); processIterator
-        .hasNext();) {
-      FinishInvoiceHook process = processIterator.next();
-      process.exec(invoice, cashUpId);
-    }
+    finishInvoiceHookRunner.runHooks(invoice, cashUpId);
   }
 
   private List<InvoiceLineTax> createInvoiceLineTaxes(OrderLine orderLine) {

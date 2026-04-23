@@ -35,9 +35,10 @@ import org.openbravo.model.ad.access.UserRoles;
 import org.openbravo.model.ad.system.Language;
 import org.openbravo.model.common.enterprise.Warehouse;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.POSConstants;
-import org.openbravo.retail.posterminal.POSUtils;
 import org.openbravo.retail.posterminal.TerminalAccess;
+
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosConstants;
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 public class OCPOSLoginHandler extends OCMobileCoreLoginHandler {
   private static final Logger log = LogManager.getLogger();
@@ -200,7 +201,7 @@ public class OCPOSLoginHandler extends OCMobileCoreLoginHandler {
     OBPOSApplications terminal = apps.get(0);
     defaults.client = terminal.getClient().getId();
     defaults.org = terminal.getOrganization().getId();
-    Warehouse warehouse = POSUtils.getWarehouseForTerminal(terminal);
+    Warehouse warehouse = OcrePosTerminalSupport.getWarehouseForTerminal(terminal);
     defaults.warehouse = warehouse != null ? warehouse.getId() : null;
     RequestContext.get().setSessionAttribute("POSTerminal", terminal.getId());
     return defaults;
@@ -233,7 +234,7 @@ public class OCPOSLoginHandler extends OCMobileCoreLoginHandler {
     query.setParameter("stOrgId", terminal.getOrganization().getId());
     query.setParameter("clientId", terminal.getClient().getId());
     query.setParameter("userId", currentUser.getId());
-    query.setParameter("formId", POSUtils.WEB_POS_FORM_ID);
+    query.setParameter("formId", OcrePosConstants.WEB_POS_FORM_ID);
     query.setMaxResults(1);
 
     List<Object[]> listResults = query.list();
@@ -251,7 +252,7 @@ public class OCPOSLoginHandler extends OCMobileCoreLoginHandler {
 
   private int getDistanceToStoreOrganizationForCertainRole(Role currentRole,
       OBPOSApplications terminal) {
-    if (hasMobileAccess(currentRole, POSConstants.APP_NAME)) {
+    if (hasMobileAccess(currentRole, OcrePosConstants.APP_NAME)) {
       String hqlQueryStr = "SELECT to_number(ad_isorgincluded(:stOrgId, rolOrg.organization.id, :clientId)) as distance "
           + " FROM ADRoleOrganization rolOrg WHERE rolOrg.role.id = :roleId "
           + " and to_number(ad_isorgincluded(:stOrgId, rolOrg.organization.id, :clientId)) > 0 "

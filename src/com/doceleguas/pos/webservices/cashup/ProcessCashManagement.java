@@ -15,7 +15,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.UUID;
 
-import javax.enterprise.inject.Any;
 import javax.enterprise.inject.spi.CDI;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -36,8 +35,8 @@ import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSAppPayment;
 import org.openbravo.retail.posterminal.OBPOSPaymentMethodCashup;
 import org.openbravo.retail.posterminal.OBPOSPaymentcashupEvents;
-import org.openbravo.retail.posterminal.ProcessCashMgmtHook;
 import com.doceleguas.pos.webservices.cashup.engine.UpdateCashup;
+import com.doceleguas.pos.webservices.spi.OcreProcessCashMgmtHooks;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
@@ -292,18 +291,11 @@ public class ProcessCashManagement implements WebService {
       // 11. Flush before executing hooks
       OBDal.getInstance().flush();
 
-      // 12. Execute ProcessCashMgmtHook via CDI lookup
+      // 12. Execute process-cash-mgmt hooks via SPI (retail hooks in retailcompat impl)
       try {
-        javax.enterprise.inject.Instance<ProcessCashMgmtHook> hooks =
-            CDI.current().select(ProcessCashMgmtHook.class,
-                new javax.enterprise.inject.literal.InjectLiteral());
-        if (hooks != null) {
-          for (ProcessCashMgmtHook hook : hooks) {
-            hook.exec(jsonBody, type, appPayment, cashup, cashupEvent, amount, origAmount);
-          }
-        }
+        OcreProcessCashMgmtHooks hooks = CDI.current().select(OcreProcessCashMgmtHooks.class).get();
+        hooks.runAll(jsonBody, type, appPayment, cashup, cashupEvent, amount, origAmount);
       } catch (Exception hookEx) {
-        // Hooks are optional extensions; log but don't fail the transaction
         log.warn("Error executing ProcessCashMgmtHook: {}", hookEx.getMessage());
       }
 

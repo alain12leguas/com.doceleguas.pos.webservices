@@ -27,8 +27,9 @@ import org.openbravo.model.ad.access.RoleOrganization;
 import org.openbravo.model.ad.access.User;
 import org.openbravo.model.ad.access.UserRoles;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.POSUtils;
 import org.openbravo.retail.posterminal.TerminalAccess;
+
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosConstants;
 import org.openbravo.service.db.DbUtility;
 import org.openbravo.service.web.WebService;
 
@@ -250,7 +251,7 @@ public class PreLoginActions implements WebService {
 
   private boolean hasADFormAccess(UserRoles userRole) {
     for (FormAccess form : userRole.getRole().getADFormAccessList()) {
-      if (form.getSpecialForm().getId().equals(POSUtils.WEB_POS_FORM_ID)) {
+      if (form.getSpecialForm().getId().equals(OcrePosConstants.WEB_POS_FORM_ID)) {
         return true;
       }
     }

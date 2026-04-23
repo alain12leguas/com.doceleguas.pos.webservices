@@ -10,7 +10,8 @@ import org.openbravo.model.common.enterprise.OrganizationInformation;
 import org.openbravo.model.common.geography.Country;
 import org.openbravo.model.common.geography.Region;
 import org.openbravo.retail.posterminal.OBPOSApplications;
-import org.openbravo.retail.posterminal.POSUtils;
+
+import com.doceleguas.pos.webservices.internal.terminal.OcrePosTerminalSupport;
 
 public class OCTaxZone extends Model {
   @SuppressWarnings("deprecation")
@@ -20,7 +21,7 @@ public class OCTaxZone extends Model {
     String selectList = jsonParams.getString("selectList");
     Long limit = jsonParams.optLong("limit", 1000);
     Long offset = jsonParams.optLong("offset", 0);
-    OBPOSApplications posDetail = POSUtils.getTerminalById(jsonParams.getString("pos"));
+    OBPOSApplications posDetail = OcrePosTerminalSupport.getTerminalById(jsonParams.getString("pos"));
     final OrganizationInformation storeInfo = posDetail.getOrganization()
         .getOrganizationInformationList()
         .get(0);
@@ -59,7 +60,7 @@ public class OCTaxZone extends Model {
     }
 
     sql += " AND e.C_Tax_ID IN (" + sqlTax + ") ";
-    if (POSUtils.filterTaxesFromStoreLocation(posDetail)) {
+    if (OcrePosTerminalSupport.filterTaxesFromStoreLocation(posDetail)) {
       if (fromCountry != null) {
         sql += " AND (e.From_Country_ID = :countryId OR e.From_Country_ID IS NULL) ";
       } else {
