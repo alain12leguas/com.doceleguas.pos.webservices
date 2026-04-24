@@ -125,6 +125,21 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         // generation on the next POS load.
         OcrePosTerminalSupport.applyReportedDocumentSequences(terminalContext.terminal, orderJson);
         OBDal.getInstance().flush();
+        OBDal.getInstance().refresh(order);
+        // Lay-by / layaway: a second sync reuses the same documentNo. Without an extra pass,
+        // no new FIN_Payment rows are created and successive instalments never reach the server.
+        // Contract: POS may resend the full payments[]; we only create rows whose computed
+        // document number is not already linked to this order (see createBasicPayments).
+        if (isLayawayDuplicateEligibleForPaymentPass(order, orderJson)
+            && shouldCreatePayments(orderJson)) {
+          applyLayawayReentryOrderHeaderAndLinesFromPayload(order, orderJson);
+          applyObposLayawayFromOrderLoaderRule(order, orderJson);
+          OBDal.getInstance().save(order);
+          OBDal.getInstance().flush();
+          OBDal.getInstance().refresh(order);
+          createBasicPayments(orderJson, order, terminalContext, true);
+          OBDal.getInstance().flush();
+        }
         processedOrders.put(successOrderJson(order, true));
         continue;
       }
@@ -151,7 +166,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         OBDal.getInstance().refresh(order);
       }
       if (shouldCreatePayments(orderJson)) {
-        createBasicPayments(orderJson, order, terminalContext);
+        createBasicPayments(orderJson, order, terminalContext, false);
       }
       OBDal.getInstance().flush();
 
@@ -581,8 +596,13 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     return cfg;
   }
 
-  private void createBasicPayments(JSONObject orderJson, Order order, TerminalContext ctx)
-      throws Exception {
+  /**
+   * @param skipIfFinPaymentDocumentNoExistsOnOrder when true (layaway duplicate re-import), skip
+   *        creating a payment if a FIN_Payment with the same computed document number is already
+   *        linked to this order's payment plan (idempotent full {@code payments[]} resend).
+   */
+  private void createBasicPayments(JSONObject orderJson, Order order, TerminalContext ctx,
+      boolean skipIfFinPaymentDocumentNoExistsOnOrder) throws Exception {
     JSONArray payments = orderJson.optJSONArray("payments");
     if (payments == null || payments.length() == 0) {
       return;
@@ -597,10 +617,20 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     FIN_PaymentSchedule invoiceScheduleForPsd = linkOrderPsdToInvoicePaymentScheduleIfInvoiceExists(
         order, paymentSchedule);
     OBDal.getInstance().flush();
-    int paymentCount = 0;
+    // Slots: first payment uses the order document number, then -1, -2… (same as previous impl).
+    int docSlot = 0;
     for (int i = 0; i < payments.length(); i++) {
       JSONObject paymentJson = payments.getJSONObject(i);
       if (paymentJson.optBoolean("changePayment", false)) {
+        continue;
+      }
+      if (paymentJson.optBoolean("isPrePayment", false)) {
+        // Layaway re-sync: POS can send isPrePayment on the first line; we skip creating FIN_Payment
+        // (OrderLoader#handlePayments) but must still advance the document-number slot so the next
+        // line does not reuse the first payment's documentNo and get dropped as "already imported".
+        if (skipIfFinPaymentDocumentNoExistsOnOrder) {
+          docSlot++;
+        }
         continue;
       }
 
@@ -626,11 +656,19 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         paymentDocType = FIN_Utility.getDocumentType(order.getOrganization(), "ARR");
       }
       String paymentDocNo = order.getDocumentNo();
-      if (paymentCount > 0) {
-        paymentDocNo = paymentDocNo + "-" + paymentCount;
+      if (docSlot > 0) {
+        paymentDocNo = paymentDocNo + "-" + docSlot;
       }
       if (paymentJson.has("reversedPaymentId") && !paymentJson.isNull("reversedPaymentId")) {
         paymentDocNo = "*R*" + paymentDocNo;
+      }
+      if (skipIfFinPaymentDocumentNoExistsOnOrder
+          && finPaymentWithDocumentNoLinkedToOrderExists(paymentDocNo, order)) {
+        log.info(
+            "[OCOrder][core] skipping already-imported payment documentNo={} for order={}",
+            paymentDocNo, order.getDocumentNo());
+        docSlot++;
+        continue;
       }
       Date paymentDate = parseDate(paymentJson.optString("date", null));
 
@@ -659,13 +697,38 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       FIN_PaymentProcess.doProcessPayment(payment, "P", null, null);
       ensureInvoicePaymentPlanSharesSavedPaymentDetails(payment, invoiceScheduleForPsd);
       created.add(payment);
-      paymentCount++;
+      docSlot++;
     }
 
     if (!created.isEmpty()) {
       syncInvoiceHeaderAndScheduleAfterPosPayments(order, created);
       OBDal.getInstance().flush();
     }
+  }
+
+  private boolean finPaymentWithDocumentNoLinkedToOrderExists(String paymentDocumentNo,
+      Order order) {
+    if (StringUtils.isBlank(paymentDocumentNo) || order == null) {
+      return false;
+    }
+    String sql = "select count(*) from fin_payment p "
+        + "join fin_payment_detail pd on p.fin_payment_id = pd.fin_payment_id "
+        + "join fin_payment_scheduledetail psd on pd.fin_payment_detail_id = psd.fin_payment_detail_id "
+        + "join fin_payment_schedule ps on psd.fin_payment_schedule_order = ps.fin_payment_schedule_id "
+        + "where p.documentno = ? and ps.c_order_id = ? and p.ad_client_id = ? and p.isactive = 'Y'";
+    try (PreparedStatement ps = OBDal.getInstance().getConnection().prepareStatement(sql)) {
+      ps.setString(1, paymentDocumentNo);
+      ps.setString(2, order.getId());
+      ps.setString(3, order.getClient().getId());
+      try (ResultSet rs = ps.executeQuery()) {
+        if (rs.next()) {
+          return rs.getInt(1) > 0;
+        }
+      }
+    } catch (Exception e) {
+      throw new OBException("Failed to look up existing FIN_Payment for order " + order.getId(), e);
+    }
+    return false;
   }
 
   /**
@@ -965,6 +1028,86 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     boolean layaway =
         !isQuotation && !isDeleted && !completeTicket && !payOnCredit;
     order.setObposIslayaway(layaway);
+  }
+
+  /**
+   * First vs second SaveOrder: both may send the same {@code documentNo}. Only treat duplicate
+   * re-imports as layaway payment passes when the payload or persisted order is clearly layaway,
+   * so other duplicate retries stay strictly idempotent (no second FIN_Payment).
+   * <p>
+   * Payments contract (aligned with retail {@code handlePayments}): each non-change line uses
+   * {@code origAmount} / {@code paid} / {@code amount}; the server assigns FIN_Payment document
+   * numbers as {@code orderNo}, {@code orderNo-1}, … Re-sending the full array requires skipping
+   * already-persisted document numbers (see {@link #createBasicPayments}).
+   */
+  private boolean isLayawayDuplicateEligibleForPaymentPass(Order order, JSONObject orderJson) {
+    if (orderJson.optBoolean("isLayaway", false)) {
+      return true;
+    }
+    if (order.isObposIslayaway() != null && order.isObposIslayaway()) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Parity with {@code OrderLoader} saveRecord else-branch (≈L389-423): when reloading an
+   * existing order (here: duplicate import), refresh header prepayment and line delivery / paid
+   * flags from the payload.
+   */
+  private void applyLayawayReentryOrderHeaderAndLinesFromPayload(Order order, JSONObject orderJson)
+      throws Exception {
+    boolean isQuotation = orderJson.optBoolean("isQuotation", false);
+    boolean isDeleted = orderJson.optBoolean("obposIsDeleted", false);
+    boolean deliver = !isQuotation && !isDeleted && orderJson.optBoolean("deliver", false);
+    order.setDelivered(deliver);
+
+    if (orderJson.has("obposPrepaymentamt") && !orderJson.isNull("obposPrepaymentamt")) {
+      order.setObposPrepaymentamt(BigDecimal.valueOf(orderJson.getDouble("obposPrepaymentamt")));
+    }
+    if (orderJson.has("obposPrepaymentlimitamt")
+        && !orderJson.isNull("obposPrepaymentlimitamt")) {
+      order.setObposPrepaymentlimitamt(
+          BigDecimal.valueOf(orderJson.getDouble("obposPrepaymentlimitamt")));
+    }
+    if (orderJson.has("obposPrepaymentlaylimitamt")
+        && !orderJson.isNull("obposPrepaymentlaylimitamt")) {
+      order.setObposPrepaymentlaylimitamt(orderJson.getLong("obposPrepaymentlaylimitamt"));
+    }
+    if (!orderJson.has("channel") && orderJson.has("obposAppCashup")
+        && !orderJson.isNull("obposAppCashup")) {
+      order.setObposAppCashup(orderJson.getString("obposAppCashup"));
+    }
+    order.setOBPOSNotInvoiceOnCashUp(orderJson.optBoolean("oBPOSNotInvoiceOnCashUp", false));
+
+    JSONArray orderlines = orderJson.optJSONArray("lines");
+    if (orderlines == null || orderlines.length() == 0) {
+      return;
+    }
+    List<OrderLine> dbLines = new ArrayList<>(order.getOrderLineList());
+    dbLines.sort((a, b) -> {
+      long la = a.getLineNo() != null ? a.getLineNo() : 0L;
+      long lb = b.getLineNo() != null ? b.getLineNo() : 0L;
+      return Long.compare(la, lb);
+    });
+    int n = Math.min(orderlines.length(), dbLines.size());
+    for (int i = 0; i < n; i++) {
+      OrderLine orderLine = dbLines.get(i);
+      JSONObject jsonOrderLine = orderlines.getJSONObject(i);
+      orderLine
+          .setObposCanbedelivered(jsonOrderLine.optBoolean("obposCanbedelivered", false));
+      orderLine.setObposIspaid(jsonOrderLine.optBoolean("obposIspaid", false));
+      BigDecimal qtyToDeliver;
+      if (jsonOrderLine.has("obposQtytodeliver") && !jsonOrderLine.isNull("obposQtytodeliver")) {
+        qtyToDeliver = BigDecimal
+            .valueOf(jsonOrderLine.getDouble("obposQtytodeliver"))
+            .stripTrailingZeros();
+      } else {
+        qtyToDeliver = orderLine.getOrderedQuantity();
+      }
+      orderLine.setDeliveredQuantity(qtyToDeliver);
+      OBDal.getInstance().save(orderLine);
+    }
   }
 
   private PaymentResolution resolvePaymentMethodAndAccount(JSONObject paymentJson,
