@@ -517,8 +517,6 @@ public class TerminalModel {
         pricelist.put("salesPriceList", getBooleanValue(row.get("salesPriceList")));
         pricelist.put("currency", getStringValue(row.get("currency")));
         pricelist.put("currency$_identifier", getStringValue(row.get("currency$_identifier")));
-        pricelist.put("iSOCode", getStringValue(row.get("iSOCode")));
-        pricelist.put("symbol", getStringValue(row.get("symbol")));
       } catch (JSONException e) {
         log.error("Error building pricelist JSON", e);
       }
