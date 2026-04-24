@@ -110,6 +110,23 @@ public class OcreNativeStandardDocumentsService {
     if (!orderJson.optBoolean("generateShipment", false)) {
       return null;
     }
+    OBDal.getInstance().refresh(order);
+    OBCriteria<ShipmentInOut> existing = OBDal.getInstance().createCriteria(ShipmentInOut.class);
+    existing.add(Restrictions.eq(ShipmentInOut.PROPERTY_SALESORDER, order));
+    existing.setFilterOnReadableOrganization(false);
+    existing.setMaxResults(1);
+    ShipmentInOut existingInOut = (ShipmentInOut) existing.uniqueResult();
+    if (existingInOut != null) {
+      List<ShipmentInOutLine> existingLines = existingInOut
+          .getMaterialMgmtShipmentInOutLineList();
+      if (existingLines != null && !existingLines.isEmpty()) {
+        return existingInOut;
+      }
+      // Orphan header (e.g. first pass with no obposIspaid lines): idempotency must not
+      // return this; drop it so this run can create lines + inventory.
+      OBDal.getInstance().remove(existingInOut);
+      OBDal.getInstance().flush();
+    }
     enrichOrderJsonDefaults(orderJson);
 
     TriggerHandler.getInstance().disable();
@@ -203,6 +220,16 @@ public class OcreNativeStandardDocumentsService {
       throws Exception {
     if (!shouldCreateInvoice(orderJson)) {
       return null;
+    }
+    OBDal.getInstance().refresh(order);
+    OBCriteria<Invoice> existingInv = OBDal.getInstance().createCriteria(Invoice.class);
+    existingInv.add(Restrictions.eq(Invoice.PROPERTY_SALESORDER, order));
+    existingInv.setFilterOnReadableOrganization(false);
+    existingInv.setMaxResults(1);
+    Invoice inv = (Invoice) existingInv.uniqueResult();
+    if (inv != null) {
+      relinkInvoiceLinesToGoodsShipmentIfMissing(inv, shipment);
+      return inv;
     }
     enrichOrderJsonDefaults(orderJson);
 
@@ -342,6 +369,39 @@ public class OcreNativeStandardDocumentsService {
       }
     }
     return null;
+  }
+
+  /**
+   * If the invoice was created while the goods shipment had no lines (e.g. empty header recycled on
+   * a later sync), attach the correct {@link ShipmentInOutLine} to each sales invoice line.
+   */
+  private void relinkInvoiceLinesToGoodsShipmentIfMissing(Invoice inv, ShipmentInOut shipment) {
+    if (inv == null || shipment == null) {
+      return;
+    }
+    OBDal.getInstance().refresh(inv);
+    OBDal.getInstance().refresh(shipment);
+    List<InvoiceLine> invLines = inv.getInvoiceLineList();
+    if (invLines == null) {
+      return;
+    }
+    for (InvoiceLine il : invLines) {
+      if (il == null) {
+        continue;
+      }
+      if (il.getGoodsShipmentLine() != null) {
+        continue;
+      }
+      if (il.getSalesOrderLine() == null) {
+        continue;
+      }
+      ShipmentInOutLine sil = findShipmentLineForOrderLine(shipment, il.getSalesOrderLine());
+      if (sil == null) {
+        continue;
+      }
+      il.setGoodsShipmentLine(sil);
+      OBDal.getInstance().save(il);
+    }
   }
 
   private void addInvoiceLineTax(InvoiceLine il, OrderLine ol, int pricePrecision) {

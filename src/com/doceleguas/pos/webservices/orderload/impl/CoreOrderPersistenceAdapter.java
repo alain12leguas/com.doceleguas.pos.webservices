@@ -17,8 +17,10 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -140,6 +142,35 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
           createBasicPayments(orderJson, order, terminalContext, true);
           OBDal.getInstance().flush();
         }
+        // Same duplicate path: final "complete ticket" sync must close the order, generate
+        // shipment/invoice, and set line flags — mirroring the non-duplicate path (which
+        // duplicate previously skipped).
+        OBDal.getInstance().refresh(order);
+        applyObposLayawayFromOrderLoaderRule(order, orderJson);
+        if (isCompletedLaybyDocumentClose(orderJson)) {
+          markOrderLinesReadyForPosDocuments(order);
+        }
+        OBDal.getInstance().save(order);
+        OBDal.getInstance().flush();
+        OBDal.getInstance().refresh(order);
+        enrichOrderJsonForCompletedLayawayIfNeeded(orderJson);
+        if (isCompletedLaybyDocumentClose(orderJson)) {
+          completeOrder(order, orderJson);
+        }
+        OBDal.getInstance().save(order);
+        OBDal.getInstance().flush();
+        OBDal.getInstance().refresh(order);
+        if (shouldCreateStandardPosDocuments(orderJson)) {
+          nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
+          nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
+          ShipmentInOut shipment = nativeStandardDocumentsService.createShipmentIfRequested(order,
+              orderJson);
+          nativeStandardDocumentsService.createInvoiceIfRequested(order, orderJson, shipment);
+          // Payments ran before invoice existed: link FIN_Payment PSD rows to the invoice plan.
+          alignOrderFinPaymentsToInvoiceIfPresent(order);
+          OBDal.getInstance().refresh(order);
+        }
+        OBDal.getInstance().flush();
         processedOrders.put(successOrderJson(order, true));
         continue;
       }
@@ -157,6 +188,12 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       // fin_payment_scheduledetail.fin_payment_schedule_invoice → empty Payment Details on invoice).
       OBDal.getInstance().flush();
       OBDal.getInstance().refresh(order);
+      if (isCompletedLaybyDocumentClose(orderJson)) {
+        markOrderLinesReadyForPosDocuments(order);
+        OBDal.getInstance().flush();
+        OBDal.getInstance().refresh(order);
+      }
+      enrichOrderJsonForCompletedLayawayIfNeeded(orderJson);
       if (shouldCreateStandardPosDocuments(orderJson)) {
         nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
         nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
@@ -988,16 +1025,83 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
    * retail behavior without depending on OrderLoader utility classes.
    */
   private boolean shouldCreateStandardPosDocuments(JSONObject orderJson) {
-    if (OrderFlowUtils.classify(orderJson) != OrderFlowType.STANDARD_SALE) {
+    if (!orderJson.optBoolean("completeTicket", false)) {
       return false;
     }
-    if (!orderJson.optBoolean("completeTicket", false)) {
+    if (isCompletedLaybyDocumentClose(orderJson)) {
+      return true;
+    }
+    if (OrderFlowUtils.classify(orderJson) != OrderFlowType.STANDARD_SALE) {
       return false;
     }
     return orderJson.optBoolean("generateShipment", false)
         || orderJson.optBoolean("generateInvoice", false)
         || orderJson.optBoolean("generateExternalInvoice", false)
         || orderJson.has("calculatedInvoice");
+  }
+
+  /**
+   * True when the payload closes a lay-by: fully paid, ticket complete. Native shipment/invoice
+   * (see OcreNativeStandardDocumentsService) is then enabled even if the client omits
+   * {@code generate*} flags, which the Web POS "ALL" step usually sets.
+   */
+  private boolean isCompletedLaybyDocumentClose(JSONObject orderJson) {
+    if (!orderJson.optBoolean("completeTicket", false)) {
+      return false;
+    }
+    if (OrderFlowUtils.classify(orderJson) != OrderFlowType.LAYAWAY) {
+      return false;
+    }
+    BigDecimal remaining = asBigDecimal(orderJson, "amountRemaining", null);
+    if (remaining != null && remaining.compareTo(BigDecimal.ZERO) == 0) {
+      return true;
+    }
+    if ("paid".equalsIgnoreCase(orderJson.optString("status", "").trim())) {
+      return true;
+    }
+    return false;
+  }
+
+  private void enrichOrderJsonForCompletedLayawayIfNeeded(JSONObject orderJson)
+      throws JSONException {
+    if (!isCompletedLaybyDocumentClose(orderJson)) {
+      return;
+    }
+    if (!orderJson.has("generateShipment")) {
+      orderJson.put("generateShipment", true);
+    }
+    if (!orderJson.has("deliver")) {
+      orderJson.put("deliver", true);
+    }
+    if (!orderJson.has("generateExternalInvoice") && !orderJson.has("generateInvoice")) {
+      orderJson.put("generateExternalInvoice", true);
+    }
+  }
+
+  /**
+   * Shipment/invoice only include lines with {@code obposIspaid}; ensure completed lay-bys don't
+   * get stuck on unpaid when the client omits those flags in JSON.
+   */
+  private void markOrderLinesReadyForPosDocuments(Order order) {
+    if (order.getOrderLineList() == null) {
+      return;
+    }
+    for (OrderLine ol : order.getOrderLineList()) {
+      if (ol == null) {
+        continue;
+      }
+      if (ol.isObposIsDeleted() != null && ol.isObposIsDeleted()) {
+        continue;
+      }
+      ol.setObposIspaid(true);
+      if (!Boolean.TRUE.equals(ol.isObposCanbedelivered())) {
+        ol.setObposCanbedelivered(true);
+      }
+      if (ol.getOrderedQuantity() != null) {
+        ol.setDeliveredQuantity(ol.getOrderedQuantity().abs());
+      }
+      OBDal.getInstance().save(ol);
+    }
   }
 
   private void completeOrder(Order order, JSONObject orderJson) {
@@ -1294,6 +1398,78 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         continue;
       }
       OBDal.getInstance().remove(psd);
+    }
+  }
+
+  /**
+   * When FIN_Payment rows are created from the order plan before a sales invoice exists,
+   * {@link FIN_PaymentScheduleDetail#PROPERTY_INVOICEPAYMENTSCHEDULE} stays null and the
+   * invoice "Payment Plan" is empty. Call after the native invoice is present (duplicate
+   * layaway completion) to point paid PSDs at the invoice schedule and resync the invoice
+   * header.
+   */
+  private void alignOrderFinPaymentsToInvoiceIfPresent(Order order) {
+    if (order == null) {
+      return;
+    }
+    OBDal.getInstance().refresh(order);
+    FIN_PaymentSchedule orderSchedule = createOrReuseOrderPaymentSchedule(order);
+    FIN_PaymentSchedule invoiceSchedule = linkOrderPsdToInvoicePaymentScheduleIfInvoiceExists(order,
+        orderSchedule);
+    if (invoiceSchedule == null) {
+      return;
+    }
+    OBDal.getInstance().flush();
+    linkPaidOrderPsdToInvoiceSchedule(orderSchedule, invoiceSchedule);
+    Set<FIN_Payment> linkedPayments = new HashSet<>();
+    List<FIN_PaymentScheduleDetail> orderPsds = orderSchedule
+        .getFINPaymentScheduleDetailOrderPaymentScheduleList();
+    if (orderPsds != null) {
+      for (FIN_PaymentScheduleDetail psd : orderPsds) {
+        if (psd == null || psd.getPaymentDetails() == null) {
+          continue;
+        }
+        FIN_Payment p = psd.getPaymentDetails().getFinPayment();
+        if (p != null) {
+          linkedPayments.add(p);
+        }
+      }
+    }
+    for (FIN_Payment p : linkedPayments) {
+      ensureInvoicePaymentPlanSharesSavedPaymentDetails(p, invoiceSchedule);
+    }
+    if (!linkedPayments.isEmpty()) {
+      syncInvoiceHeaderAndScheduleAfterPosPayments(order, new ArrayList<>(linkedPayments));
+    }
+    OBDal.getInstance().flush();
+  }
+
+  private void linkPaidOrderPsdToInvoiceSchedule(FIN_PaymentSchedule orderSchedule,
+      FIN_PaymentSchedule invoiceSchedule) {
+    if (orderSchedule == null || invoiceSchedule == null) {
+      return;
+    }
+    List<FIN_PaymentScheduleDetail> list = orderSchedule
+        .getFINPaymentScheduleDetailOrderPaymentScheduleList();
+    if (list == null) {
+      return;
+    }
+    boolean changed = false;
+    for (FIN_PaymentScheduleDetail psd : list) {
+      if (psd == null) {
+        continue;
+      }
+      if (psd.getPaymentDetails() == null) {
+        continue;
+      }
+      if (psd.getInvoicePaymentSchedule() == null) {
+        psd.setInvoicePaymentSchedule(invoiceSchedule);
+        OBDal.getInstance().save(psd);
+        changed = true;
+      }
+    }
+    if (changed) {
+      OBDal.getInstance().flush();
     }
   }
 
