@@ -93,6 +93,9 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
   @Inject
   private OcreNativeStandardDocumentsService nativeStandardDocumentsService;
 
+  @Inject
+  private OcreQuotationLinkageHelper ocreQuotationLinkageHelper;
+
   @Override
   public JSONObject persistTransformedEnvelope(JSONObject transformedEnvelope) throws Exception {
     JSONArray data = transformedEnvelope.optJSONArray("data");
@@ -127,6 +130,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       }
 
       createOrderLines(orderJson, order, terminalContext);
+      ocreQuotationLinkageHelper.associateOrderToQuotationIfNeeded(order, orderJson);
       if (shouldCompleteOrder(orderJson)) {
         completeOrder(order, orderJson);
       }
@@ -266,6 +270,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       return new OrderCreationResult(existing, true);
     }
 
+    ocreQuotationLinkageHelper.markPreviousQuotationRejectedIfNeeded(orderJson);
+
     Date orderDate = parseDate(orderJson.optString("orderDate", null));
     BusinessPartner bp = resolveBusinessPartner(orderJson, ctx);
     Location bpLocation = resolveBusinessPartnerLocation(orderJson, bp, ctx);
@@ -307,6 +313,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     }
 
     OBDal.getInstance().save(order);
+    OBDal.getInstance().flush();
+    ocreQuotationLinkageHelper.applyRejectedQuotationReference(order, orderJson);
     OBDal.getInstance().flush();
     return new OrderCreationResult(order, false);
   }
@@ -380,6 +388,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       line.setLineNetAmount(lineNet);
       line.setLineGrossAmount(lineGross);
       line.setTaxableAmount(lineNet);
+
+      applyObrdmLineFieldsFromPayload(lineJson, line);
 
       OBDal.getInstance().save(line);
       persistedLines.add(new PersistedOrderLine(line, product, lineJson, payloadLineId));
@@ -1617,6 +1627,93 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     }
     throw new OBException(
         "Missing required numeric fields " + java.util.Arrays.toString(keys) + " in " + context);
+  }
+
+  private void applyObrdmLineFieldsFromPayload(JSONObject lineJson, OrderLine line)
+      throws JSONException {
+    String mode = firstNonBlank(
+        lineJson.optString("obrdmDeliveryMode", null),
+        lineJson.optString("deliveryMode", null));
+    if (StringUtils.isNotBlank(mode)) {
+      line.setObrdmDeliveryMode(mode.trim());
+    }
+    Date delDate = extractLineObrdmDeliveryDate(lineJson);
+    if (delDate != null) {
+      line.setObrdmDeliveryDate(delDate);
+    }
+    Timestamp delTime = extractLineObrdmDeliveryTime(lineJson);
+    if (delTime != null) {
+      line.setObrdmDeliveryTime(delTime);
+    }
+    BigDecimal payAtDelivery = asBigDecimal(lineJson, "obrdmAmttopayindelivery", null);
+    if (payAtDelivery == null) {
+      payAtDelivery = asBigDecimal(lineJson, "deliveryAmount", null);
+    }
+    if (payAtDelivery != null) {
+      line.setObrdmAmttopayindelivery(payAtDelivery);
+    }
+  }
+
+  private Date extractLineObrdmDeliveryDate(JSONObject lineJson) throws JSONException {
+    for (String key : new String[] { "obrdmDeliveryDate", "deliveryDate" }) {
+      if (!lineJson.has(key) || lineJson.isNull(key)) {
+        continue;
+      }
+      Object v = lineJson.get(key);
+      if (v instanceof Number) {
+        return new Date(((Number) v).longValue());
+      }
+      if (v instanceof String) {
+        return parseLineDateTimeOrNull((String) v, false);
+      }
+    }
+    return null;
+  }
+
+  private Timestamp extractLineObrdmDeliveryTime(JSONObject lineJson) throws JSONException {
+    if (!lineJson.has("obrdmDeliveryTime") || lineJson.isNull("obrdmDeliveryTime")) {
+      return null;
+    }
+    Object v = lineJson.get("obrdmDeliveryTime");
+    if (v instanceof Number) {
+      return new Timestamp(((Number) v).longValue());
+    }
+    if (v instanceof String) {
+      Date parsed = parseLineDateTimeOrNull((String) v, true);
+      if (parsed != null) {
+        return new Timestamp(parsed.getTime());
+      }
+    }
+    return null;
+  }
+
+  /**
+   * @param isTime if true, prefer SQL time / datetime parsing for OBRDM time-of-day.
+   */
+  private Date parseLineDateTimeOrNull(String raw, boolean isTime) {
+    if (StringUtils.isBlank(raw)) {
+      return null;
+    }
+    if (!isTime) {
+      return parseLineDateTimeOrNullInternal(raw);
+    }
+    try {
+      return new Date(Timestamp.valueOf(raw).getTime());
+    } catch (Exception e) {
+      return parseLineDateTimeOrNullInternal(raw);
+    }
+  }
+
+  private Date parseLineDateTimeOrNullInternal(String raw) {
+    try {
+      return Date.from(OffsetDateTime.parse(raw).toInstant());
+    } catch (Exception e) {
+      try {
+        return new Date(Timestamp.valueOf(raw).getTime());
+      } catch (Exception ignored) {
+        return null;
+      }
+    }
   }
 
   private Date parseDate(String raw) {

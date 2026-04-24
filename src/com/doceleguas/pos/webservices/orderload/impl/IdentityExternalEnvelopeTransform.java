@@ -9,6 +9,7 @@ package com.doceleguas.pos.webservices.orderload.impl;
 import java.util.UUID;
 
 import javax.enterprise.context.ApplicationScoped;
+import javax.inject.Inject;
 
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
@@ -21,6 +22,9 @@ import com.doceleguas.pos.webservices.orderload.spi.ExternalEnvelopeTransform;
  */
 @ApplicationScoped
 public class IdentityExternalEnvelopeTransform implements ExternalEnvelopeTransform {
+
+  @Inject
+  private OcreExternalOrderParityService externalOrderParityService;
 
   @Override
   public JSONObject onInboundEnvelope(JSONObject envelope) throws JSONException {
@@ -55,6 +59,13 @@ public class IdentityExternalEnvelopeTransform implements ExternalEnvelopeTransf
         normalized.put("data", wrapped);
       } else if (!(data instanceof JSONArray)) {
         normalized.put("data", new JSONArray());
+      }
+    }
+
+    JSONArray dataArray = normalized.optJSONArray("data");
+    if (dataArray != null) {
+      for (int i = 0; i < dataArray.length(); i++) {
+        externalOrderParityService.apply(dataArray.getJSONObject(i));
       }
     }
 

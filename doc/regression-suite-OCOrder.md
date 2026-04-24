@@ -115,6 +115,24 @@ Run the checklist with one payload per flow:
 - `LAYAWAY`: verify `step` handling is persisted best-effort and payment/outstanding consistency
   for partial/full payments.
 
+### ExternalOrderLoader parity (delivery modes + quotation linkage)
+
+After changes to `OcreExternalOrderParityService`, `IdentityExternalEnvelopeTransform`,
+`OcreQuotationLinkageHelper`, or OBRDM mapping in `CoreOrderPersistenceAdapter`:
+
+1. **PickAndCarry / `step` all**: `lines[].obrdmDeliveryMode` omitted or `PickAndCarry`, `step: all`
+   (or default from parity). Expect `deliver` set as in legacy `ExternalOrderLoader.handleOrderSteps`
+   and shipment/invoice flags consistent with `shouldCreateStandardPosDocuments`.
+2. **Non–PickAndCarry** (e.g. `HomeDelivery`): at least one line with `obrdmDeliveryMode` not
+   `PickAndCarry`. Expect `obposQtytodeliver` 0 on those lines in the normalized payload and no
+   immediate customer shipment where retail would defer delivery.
+3. **Quotation-only**: `isQuotation: true`, no `oldId`, expect quotation doc type, `UE` doc status,
+   no payment creation.
+4. **Quotation revision**: new QT with `oldId` of prior quotation: prior `C_Order` moves to
+   `DocStatus` `CJ`, new line links `EM_Obpos_Rejected_Quotat` when applicable.
+5. **Order from quotation**: `isQuotation: false` with `oldId` of source QT: new order
+   `Quotation_ID` and lines `QuotationLine` links; source QT `DocStatus` `CA` (retail contract).
+
 ## 3. Automated client checks (OCRE-POS)
 
 In the `pos` workspace, keep unit tests for `transformForApi` / envelope shape aligned with `SaveOrder` contract (202, `messageId`, `data` array). Extend when new envelope fields are introduced.
