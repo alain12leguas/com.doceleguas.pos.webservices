@@ -134,6 +134,9 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       if (shouldCompleteOrder(orderJson)) {
         completeOrder(order, orderJson);
       }
+      // Parity with OrderLoader L436-437: drives getOrdersFilter @orderType LAY and isLayaway.
+      applyObposLayawayFromOrderLoaderRule(order, orderJson);
+      OBDal.getInstance().save(order);
       // Lines + DB triggers must persist before shipment/invoice read order totals; otherwise
       // grand total can still be 0 in memory and invoice + PSD→invoice links are skipped (no
       // fin_payment_scheduledetail.fin_payment_schedule_invoice → empty Payment Details on invoice).
@@ -947,6 +950,21 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     order.setDelivered(false);
     OBDal.getInstance().save(order);
     OBDal.getInstance().flush();
+  }
+
+  /**
+   * Parity with {@code OrderLoader} (≈L436-437): {@code em_obpos_islayaway} is used by
+   * {@code OrderQueryHelper#ORDER_TYPE_SQL} for {@code orderType} LAY and isLayaway in
+   * {@code GetOrdersFilter}.
+   */
+  private void applyObposLayawayFromOrderLoaderRule(Order order, JSONObject orderJson) {
+    boolean isQuotation = orderJson.optBoolean("isQuotation", false);
+    boolean isDeleted = orderJson.optBoolean("obposIsDeleted", false);
+    boolean completeTicket = orderJson.optBoolean("completeTicket", false);
+    boolean payOnCredit = orderJson.optBoolean("payOnCredit", false);
+    boolean layaway =
+        !isQuotation && !isDeleted && !completeTicket && !payOnCredit;
+    order.setObposIslayaway(layaway);
   }
 
   private PaymentResolution resolvePaymentMethodAndAccount(JSONObject paymentJson,

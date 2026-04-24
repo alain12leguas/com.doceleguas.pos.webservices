@@ -30,7 +30,8 @@ public final class OrderFlowUtils {
       return OrderFlowType.RETURN;
     }
     if (orderJson.optBoolean("isLayaway", false) || orderJson.optBoolean("isNewLayaway", false)
-        || orderJson.optBoolean("payOnCredit", false)) {
+        || orderJson.optBoolean("payOnCredit", false)
+        || "layby".equalsIgnoreCase(orderJson.optString("type", "").trim())) {
       return OrderFlowType.LAYAWAY;
     }
     String step = resolveStep(orderJson);
