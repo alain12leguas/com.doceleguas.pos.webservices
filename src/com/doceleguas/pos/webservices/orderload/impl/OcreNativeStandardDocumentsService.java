@@ -92,9 +92,14 @@ public class OcreNativeStandardDocumentsService {
       BigDecimal toDel = null;
       if (lj.has("obposQtytodeliver") && !lj.isNull("obposQtytodeliver")) {
         toDel = BigDecimal.valueOf(lj.getDouble("obposQtytodeliver")).stripTrailingZeros();
+        // Zero often means "not set" in partial payloads, not "deliver 0" (which blocks shipment
+        // lines in createShipmentIfRequested).
+        if (toDel != null && toDel.compareTo(BigDecimal.ZERO) == 0) {
+          toDel = null;
+        }
       }
       if (toDel == null) {
-        toDel = ol.getOrderedQuantity();
+        toDel = ol.getOrderedQuantity() != null ? ol.getOrderedQuantity().abs() : BigDecimal.ZERO;
       }
       ol.setDeliveredQuantity(toDel);
       OBDal.getInstance().save(ol);
@@ -111,22 +116,27 @@ public class OcreNativeStandardDocumentsService {
       return null;
     }
     OBDal.getInstance().refresh(order);
-    OBCriteria<ShipmentInOut> existing = OBDal.getInstance().createCriteria(ShipmentInOut.class);
-    existing.add(Restrictions.eq(ShipmentInOut.PROPERTY_SALESORDER, order));
-    existing.setFilterOnReadableOrganization(false);
-    existing.setMaxResults(1);
-    ShipmentInOut existingInOut = (ShipmentInOut) existing.uniqueResult();
-    if (existingInOut != null) {
-      List<ShipmentInOutLine> existingLines = existingInOut
-          .getMaterialMgmtShipmentInOutLineList();
-      if (existingLines != null && !existingLines.isEmpty()) {
-        return existingInOut;
+    OBCriteria<ShipmentInOut> byOrder = OBDal.getInstance().createCriteria(ShipmentInOut.class);
+    byOrder.add(Restrictions.eq(ShipmentInOut.PROPERTY_SALESORDER, order));
+    byOrder.setFilterOnReadableOrganization(false);
+    byOrder.addOrderBy(ShipmentInOut.PROPERTY_CREATIONDATE, false);
+    @SuppressWarnings("unchecked")
+    List<ShipmentInOut> forOrder = byOrder.list();
+    ShipmentInOut newestWithLines = null;
+    for (ShipmentInOut io : forOrder) {
+      List<ShipmentInOutLine> ll = io.getMaterialMgmtShipmentInOutLineList();
+      if (ll != null && !ll.isEmpty()) {
+        newestWithLines = io;
+        break;
       }
-      // Orphan header (e.g. first pass with no obposIspaid lines): idempotency must not
-      // return this; drop it so this run can create lines + inventory.
-      OBDal.getInstance().remove(existingInOut);
-      OBDal.getInstance().flush();
     }
+    if (newestWithLines != null) {
+      return newestWithLines;
+    }
+    for (ShipmentInOut empty : forOrder) {
+      OBDal.getInstance().remove(empty);
+    }
+    OBDal.getInstance().flush();
     enrichOrderJsonDefaults(orderJson);
 
     TriggerHandler.getInstance().disable();
@@ -169,31 +179,24 @@ public class OcreNativeStandardDocumentsService {
         if (!ol.isObposIspaid()) {
           continue;
         }
-        BigDecimal qty = ol.getDeliveredQuantity() != null ? ol.getDeliveredQuantity().abs()
-            : ol.getOrderedQuantity().abs();
-        if (qty.compareTo(BigDecimal.ZERO) == 0) {
-          continue;
+        lineNo = appendGoodsShipmentLine(shipment, ol, bin, lineNo);
+      }
+      if (lineNo == 0 && orderJson.optBoolean("completeTicket", false)) {
+        OBDal.getInstance().refresh(order);
+        List<OrderLine> persisted = order.getOrderLineList();
+        if (persisted != null) {
+          List<OrderLine> sorted = new ArrayList<>(persisted);
+          sorted.sort((a, b) -> Long.compare(a.getLineNo(), b.getLineNo()));
+          for (OrderLine ol : sorted) {
+            if (ol == null || (ol.isObposIsDeleted() != null && ol.isObposIsDeleted())) {
+              continue;
+            }
+            if (ol.getProduct() == null) {
+              continue;
+            }
+            lineNo = appendGoodsShipmentLine(shipment, ol, bin, lineNo);
+          }
         }
-        lineNo += 10;
-        ShipmentInOutLine sil = OBProvider.getInstance().get(ShipmentInOutLine.class);
-        sil.setOrganization(ol.getOrganization());
-        sil.setLineNo(lineNo);
-        sil.setShipmentReceipt(shipment);
-        sil.setSalesOrderLine(ol);
-        sil.setProduct(ol.getProduct());
-        sil.setUOM(ol.getUOM());
-        sil.setMovementQuantity(qty);
-        // M_INOUTLINE check: QUANTITYORDER and M_PRODUCT_UOM_ID are both null or both set (core
-        // OB).
-        if (ol.getOrderUOM() != null) {
-          sil.setOrderUOM(ol.getOrderUOM());
-          sil.setOrderQuantity(qty);
-        }
-        sil.setStorageBin(bin);
-        sil.setAttributeSetValue(ol.getAttributeSetValue());
-        shipment.getMaterialMgmtShipmentInOutLineList().add(sil);
-        ol.getMaterialMgmtShipmentInOutLineList().add(sil);
-        OBDal.getInstance().save(sil);
       }
 
       OBDal.getInstance().flush();
@@ -208,6 +211,36 @@ public class OcreNativeStandardDocumentsService {
     } finally {
       TriggerHandler.getInstance().enable();
     }
+  }
+
+  /**
+   * @return the last {@code lineNo} used (0 if nothing was added)
+   */
+  private long appendGoodsShipmentLine(ShipmentInOut shipment, OrderLine ol, Locator bin, long lineNo) {
+    BigDecimal qty = ol.getDeliveredQuantity() != null ? ol.getDeliveredQuantity().abs()
+        : (ol.getOrderedQuantity() != null ? ol.getOrderedQuantity().abs() : BigDecimal.ZERO);
+    if (qty.compareTo(BigDecimal.ZERO) == 0) {
+      return lineNo;
+    }
+    long next = lineNo + 10;
+    ShipmentInOutLine sil = OBProvider.getInstance().get(ShipmentInOutLine.class);
+    sil.setOrganization(ol.getOrganization());
+    sil.setLineNo(next);
+    sil.setShipmentReceipt(shipment);
+    sil.setSalesOrderLine(ol);
+    sil.setProduct(ol.getProduct());
+    sil.setUOM(ol.getUOM());
+    sil.setMovementQuantity(qty);
+    if (ol.getOrderUOM() != null) {
+      sil.setOrderUOM(ol.getOrderUOM());
+      sil.setOrderQuantity(qty);
+    }
+    sil.setStorageBin(bin);
+    sil.setAttributeSetValue(ol.getAttributeSetValue());
+    shipment.getMaterialMgmtShipmentInOutLineList().add(sil);
+    ol.getMaterialMgmtShipmentInOutLineList().add(sil);
+    OBDal.getInstance().save(sil);
+    return next;
   }
 
   /**

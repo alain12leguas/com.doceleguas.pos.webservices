@@ -146,21 +146,25 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         // shipment/invoice, and set line flags — mirroring the non-duplicate path (which
         // duplicate previously skipped).
         OBDal.getInstance().refresh(order);
+        // Before applyObposLayawayFromOrderLoaderRule: complete ticket clears em_obpos_islayaway.
+        // For step "all" the payload is often STANDARD_SALE, so we must remember "was layaway"
+        // to still mark order lines as paid and generate shipment/invoice.
+        final boolean wasPersistedLayaway = Boolean.TRUE.equals(order.isObposIslayaway());
         applyObposLayawayFromOrderLoaderRule(order, orderJson);
-        if (isCompletedLaybyDocumentClose(orderJson)) {
+        if (isCompletedLaybyForNativeDocuments(orderJson, wasPersistedLayaway)) {
           markOrderLinesReadyForPosDocuments(order);
         }
         OBDal.getInstance().save(order);
         OBDal.getInstance().flush();
         OBDal.getInstance().refresh(order);
-        enrichOrderJsonForCompletedLayawayIfNeeded(orderJson);
-        if (isCompletedLaybyDocumentClose(orderJson)) {
+        enrichOrderJsonForCompletedLayawayIfNeeded(orderJson, wasPersistedLayaway);
+        if (isCompletedLaybyForNativeDocuments(orderJson, wasPersistedLayaway)) {
           completeOrder(order, orderJson);
         }
         OBDal.getInstance().save(order);
         OBDal.getInstance().flush();
         OBDal.getInstance().refresh(order);
-        if (shouldCreateStandardPosDocuments(orderJson)) {
+        if (shouldCreateStandardPosDocuments(orderJson, wasPersistedLayaway)) {
           nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
           nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
           ShipmentInOut shipment = nativeStandardDocumentsService.createShipmentIfRequested(order,
@@ -177,6 +181,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
 
       createOrderLines(orderJson, order, terminalContext);
       ocreQuotationLinkageHelper.associateOrderToQuotationIfNeeded(order, orderJson);
+      OBDal.getInstance().refresh(order);
+      final boolean wasPersistedLayaway = Boolean.TRUE.equals(order.isObposIslayaway());
       if (shouldCompleteOrder(orderJson)) {
         completeOrder(order, orderJson);
       }
@@ -188,13 +194,13 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       // fin_payment_scheduledetail.fin_payment_schedule_invoice → empty Payment Details on invoice).
       OBDal.getInstance().flush();
       OBDal.getInstance().refresh(order);
-      if (isCompletedLaybyDocumentClose(orderJson)) {
+      if (isCompletedLaybyForNativeDocuments(orderJson, wasPersistedLayaway)) {
         markOrderLinesReadyForPosDocuments(order);
         OBDal.getInstance().flush();
         OBDal.getInstance().refresh(order);
       }
-      enrichOrderJsonForCompletedLayawayIfNeeded(orderJson);
-      if (shouldCreateStandardPosDocuments(orderJson)) {
+      enrichOrderJsonForCompletedLayawayIfNeeded(orderJson, wasPersistedLayaway);
+      if (shouldCreateStandardPosDocuments(orderJson, wasPersistedLayaway)) {
         nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
         nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
         ShipmentInOut shipment = nativeStandardDocumentsService.createShipmentIfRequested(order,
@@ -1024,11 +1030,12 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
    * When true, create native shipment/invoice (Doceleguas) for closed standard sales — equivalent
    * retail behavior without depending on OrderLoader utility classes.
    */
-  private boolean shouldCreateStandardPosDocuments(JSONObject orderJson) {
+  private boolean shouldCreateStandardPosDocuments(JSONObject orderJson,
+      boolean wasPersistedLayaway) {
     if (!orderJson.optBoolean("completeTicket", false)) {
       return false;
     }
-    if (isCompletedLaybyDocumentClose(orderJson)) {
+    if (isCompletedLaybyForNativeDocuments(orderJson, wasPersistedLayaway)) {
       return true;
     }
     if (OrderFlowUtils.classify(orderJson) != OrderFlowType.STANDARD_SALE) {
@@ -1041,30 +1048,32 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
   }
 
   /**
-   * True when the payload closes a lay-by: fully paid, ticket complete. Native shipment/invoice
-   * (see OcreNativeStandardDocumentsService) is then enabled even if the client omits
-   * {@code generate*} flags, which the Web POS "ALL" step usually sets.
+   * True when the payload closes a lay-by: fully paid, ticket complete. The Web POS
+   * {@code step: "all"} + {@code completeTicket} flow often classifies as
+   * {@link OrderFlowType#STANDARD_SALE} even though the persisted order is still a layaway until
+   * {@link #applyObposLayawayFromOrderLoaderRule} runs, so the snapshot {@code isLayaway} in JSON
+   * is not enough: pass {@code wasPersistedLayaway} (read <em>before</em> that method).
    */
-  private boolean isCompletedLaybyDocumentClose(JSONObject orderJson) {
+  private boolean isCompletedLaybyForNativeDocuments(JSONObject orderJson, boolean wasPersistedLayaway) {
     if (!orderJson.optBoolean("completeTicket", false)) {
       return false;
     }
-    if (OrderFlowUtils.classify(orderJson) != OrderFlowType.LAYAWAY) {
+    BigDecimal remaining = asBigDecimal(orderJson, "amountRemaining", null);
+    boolean finComplete = (remaining != null && remaining.compareTo(BigDecimal.ZERO) == 0)
+        || "paid".equalsIgnoreCase(orderJson.optString("status", "").trim());
+    if (!finComplete) {
       return false;
     }
-    BigDecimal remaining = asBigDecimal(orderJson, "amountRemaining", null);
-    if (remaining != null && remaining.compareTo(BigDecimal.ZERO) == 0) {
+    if (OrderFlowUtils.classify(orderJson) == OrderFlowType.LAYAWAY) {
       return true;
     }
-    if ("paid".equalsIgnoreCase(orderJson.optString("status", "").trim())) {
-      return true;
-    }
-    return false;
+    return wasPersistedLayaway;
   }
 
-  private void enrichOrderJsonForCompletedLayawayIfNeeded(JSONObject orderJson)
+  private void enrichOrderJsonForCompletedLayawayIfNeeded(JSONObject orderJson,
+      boolean wasPersistedLayaway)
       throws JSONException {
-    if (!isCompletedLaybyDocumentClose(orderJson)) {
+    if (!isCompletedLaybyForNativeDocuments(orderJson, wasPersistedLayaway)) {
       return;
     }
     if (!orderJson.has("generateShipment")) {
