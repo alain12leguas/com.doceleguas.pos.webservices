@@ -63,6 +63,12 @@ public class OcreOrderLoadOrchestrator {
 
       ret = routeAndPersist(prepared);
     } catch (Exception e) {
+      // Preserve the original cause + full stack: the envelope status below only carries
+      // e.getMessage(), which hides where the failure really originated (e.g. mandatory-field
+      // validations raised deeper in persistence/invoice/posting).
+      log.error("[OCWS_Order] order import failed for messageId={}: {}",
+          messageIn != null ? messageIn.optString("messageId", "<missing>") : "<null>",
+          e.getMessage(), e);
       try {
         ret.put(JsonConstants.RESPONSE_STATUS, JsonConstants.RPCREQUEST_STATUS_FAILURE);
         ret.put("result", "-1");
