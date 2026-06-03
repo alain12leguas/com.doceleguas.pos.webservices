@@ -412,9 +412,18 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       if (qty.compareTo(BigDecimal.ZERO) == 0) {
         throw new OBException("Order line quantity cannot be zero");
       }
-      BigDecimal unitPrice = resolveLineUnitNetPrice(lineJson, qty);
-      BigDecimal listPrice = asBigDecimal(lineJson, "baseNetUnitPrice", unitPrice);
-      BigDecimal lineNet = resolveLineNetAmount(lineJson, qty, unitPrice);
+      // baseNetUnitPrice = pre-discount net unit price; used for ListPrice and as a
+      // fallback when the payload omits net amounts.
+      BigDecimal baseNetUnitPrice = resolveLineUnitNetPrice(lineJson, qty);
+      BigDecimal listPrice = asBigDecimal(lineJson, "baseNetUnitPrice", baseNetUnitPrice);
+      BigDecimal lineNet = resolveLineNetAmount(lineJson, qty, baseNetUnitPrice);
+      // priceActual must be the effective (post-discount) net unit price. The DB
+      // trigger C_ORDERLINE_TRG recomputes LineNetAmt = qtyOrdered * priceActual on
+      // tax-excluded price lists, so using baseNetUnitPrice here would re-apply the
+      // list price and silently drop line discounts (e.g. fixedPrice promotions).
+      // For lines without discount this equals baseNetUnitPrice, so behavior is
+      // unchanged.
+      BigDecimal unitPrice = resolveEffectiveNetUnitPrice(lineNet, qty, baseNetUnitPrice);
       BigDecimal grossUnitPrice = resolveLineGrossUnitPrice(lineJson, qty, unitPrice, lineNet);
       BigDecimal grossListPrice = resolveLineGrossListPrice(lineJson, grossUnitPrice);
       BigDecimal baseGrossUnitPrice = resolveBaseGrossUnitPrice(lineJson, grossUnitPrice);
@@ -1846,6 +1855,21 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
           : lineNet.divide(qty, 6, java.math.RoundingMode.HALF_UP);
     }
     return unit;
+  }
+
+  /**
+   * Effective (post-discount) net unit price = lineNetAmount / qty. This is what must be stored as
+   * priceActual so that the C_ORDERLINE_TRG recompute of LineNetAmt (qtyOrdered * priceActual on
+   * tax-excluded price lists) preserves line discounts. When the line has no discount, lineNet
+   * equals baseNetUnitPrice * qty, so this returns the same value as {@code fallbackUnit} and
+   * behavior is unchanged.
+   */
+  private BigDecimal resolveEffectiveNetUnitPrice(BigDecimal lineNet, BigDecimal qty,
+      BigDecimal fallbackUnit) {
+    if (lineNet == null || qty.compareTo(BigDecimal.ZERO) == 0) {
+      return fallbackUnit;
+    }
+    return lineNet.divide(qty, 6, java.math.RoundingMode.HALF_UP);
   }
 
   private BigDecimal resolveLineNetAmount(JSONObject lineJson, BigDecimal qty,
