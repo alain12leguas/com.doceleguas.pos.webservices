@@ -56,6 +56,7 @@ import org.openbravo.model.common.enterprise.Warehouse;
 import org.openbravo.model.common.invoice.Invoice;
 import org.openbravo.model.common.order.Order;
 import org.openbravo.model.common.order.OrderLine;
+import org.openbravo.model.common.order.OrderLineOffer;
 import org.openbravo.model.common.plm.Product;
 import org.openbravo.model.common.uom.UOM;
 import org.openbravo.model.financialmgmt.payment.FIN_FinancialAccount;
@@ -67,6 +68,7 @@ import org.openbravo.model.financialmgmt.payment.FIN_PaymentScheduleDetail;
 import org.openbravo.model.financialmgmt.payment.PaymentTerm;
 import org.openbravo.model.financialmgmt.tax.TaxRate;
 import org.openbravo.model.materialmgmt.transaction.ShipmentInOut;
+import org.openbravo.model.pricing.priceadjustment.PriceAdjustment;
 import org.openbravo.model.pricing.pricelist.PriceList;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSAppPayment;
@@ -462,6 +464,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       applyObrdmLineFieldsFromPayload(lineJson, line);
 
       OBDal.getInstance().save(line);
+      createLineOffers(lineJson, line, baseNetUnitPrice, baseGrossUnitPrice);
       persistedLines.add(new PersistedOrderLine(line, product, lineJson, payloadLineId));
       sumNet = sumNet.add(lineNet);
       sumGross = sumGross.add(lineGross);
@@ -481,6 +484,91 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
           order.getDocumentNo(), payloadGross, sumGross);
     }
     // Do not force header totals here; native order processing will derive them from persisted lines.
+  }
+
+  /**
+   * Persists the line-level promotions/discounts carried in the OCRE-POS payload into
+   * {@code c_orderline_offer} ({@link OrderLineOffer}). Mirrors the native
+   * {@code OrderLoader} behavior so the Sales Order "Discounts and Promotions" tab and the
+   * export round-trip ({@code OrderModel.getLinePromotions}) reflect the applied discounts.
+   *
+   * <p>The OCRE-POS promotion shape differs from the native mobile shape, so keys are mapped
+   * explicitly: {@code discountRule} -&gt; M_Offer_ID, {@code amount}/{@code discountedAmount}
+   * -&gt; total discount on the line, {@code quantity} -&gt; affected qty, {@code hidden}
+   * -&gt; whether it counts towards displayed totals.
+   */
+  private void createLineOffers(JSONObject lineJson, OrderLine line, BigDecimal baseNetUnitPrice,
+      BigDecimal baseGrossUnitPrice) throws JSONException {
+    JSONArray promotions = lineJson.optJSONArray("promotions");
+    if (promotions == null || promotions.length() == 0) {
+      return;
+    }
+
+    int pricePrecision = line.getCurrency().getPricePrecision().intValue();
+    for (int p = 0; p < promotions.length(); p++) {
+      JSONObject promoJson = promotions.optJSONObject(p);
+      if (promoJson == null) {
+        continue;
+      }
+
+      String offerId = promoJson.optString("discountRule", null);
+      if (!isLikelyId(offerId)) {
+        log.warn(
+            "[OCOrder][core] line promotion without valid discountRule skipped. order={}, lineNo={}.",
+            line.getSalesOrder().getDocumentNo(), line.getLineNo());
+        continue;
+      }
+      PriceAdjustment offer = OBDal.getInstance().get(PriceAdjustment.class, offerId);
+      if (offer == null) {
+        log.warn(
+            "[OCOrder][core] line promotion discountRule {} not found; skipped. order={}, lineNo={}.",
+            offerId, line.getSalesOrder().getDocumentNo(), line.getLineNo());
+        continue;
+      }
+
+      // OCRE-POS carries the total line discount in "amount" (fallback "discountedAmount").
+      BigDecimal totalAmount = asBigDecimal(promoJson, "amount", null);
+      if (totalAmount == null) {
+        totalAmount = asBigDecimal(promoJson, "discountedAmount", BigDecimal.ZERO);
+      }
+      totalAmount = totalAmount.setScale(pricePrecision, java.math.RoundingMode.HALF_UP);
+      boolean hidden = promoJson.optBoolean("hidden", false);
+
+      OrderLineOffer promotion = OBProvider.getInstance().get(OrderLineOffer.class);
+      promotion.setId(generateUuid32());
+      promotion.setNewOBObject(true);
+      promotion.setClient(line.getClient());
+      promotion.setOrganization(line.getOrganization());
+      promotion.setSalesOrderLine(line);
+      promotion.setPriceAdjustment(offer);
+      promotion.setLineNo((long) ((p + 1) * 10));
+      promotion.setTotalAmount(totalAmount);
+      promotion.setDisplayedTotalAmount(hidden ? BigDecimal.ZERO : totalAmount);
+
+      BigDecimal qtyOffer = asBigDecimal(promoJson, "quantity", null);
+      if (qtyOffer != null) {
+        promotion.setObdiscQtyoffer(qtyOffer);
+      }
+      if (baseNetUnitPrice != null) {
+        promotion
+            .setAdjustedPrice(baseNetUnitPrice.setScale(pricePrecision, java.math.RoundingMode.HALF_UP));
+      }
+      if (baseGrossUnitPrice != null) {
+        promotion.setBaseGrossUnitPrice(
+            baseGrossUnitPrice.setScale(pricePrecision, java.math.RoundingMode.HALF_UP));
+      }
+
+      String identifier = promoJson.optString("name", null);
+      if (StringUtils.isNotBlank(identifier)) {
+        if (identifier.length() > 100) {
+          identifier = identifier.substring(identifier.length() - 100);
+        }
+        promotion.setObdiscIdentifier(identifier);
+      }
+
+      line.getOrderLineOfferList().add(promotion);
+      OBDal.getInstance().save(promotion);
+    }
   }
 
   private void createServiceRelationsForLinkedProducts(Order order,
