@@ -689,7 +689,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
    * handling beyond what the core executor performs. Cross-store payment organization is not
    * resolved (uses the replacement's organization).
    */
-  private void applyCancelAndReplaceIfNeeded(Order order, JSONObject orderJson) {
+  private void applyCancelAndReplaceIfNeeded(Order order, JSONObject orderJson)
+      throws JSONException {
     if (!"cancel_replace".equalsIgnoreCase(OrderFlowUtils.resolveStep(orderJson))) {
       return;
     }
@@ -729,6 +730,28 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       return;
     }
     POSUtils.setDefaultPaymentType(orderJson, order);
+
+    // The retail CancelAndReplaceHook (runs because jsonOrder is non-null) reads
+    // jsonOrder.obposAppCashup and jsonOrder.posTerminal (terminal UUID) off the order JSON to stamp
+    // the inverse order. OCRE-POS does not send those on the order: the cashup id arrives nested in
+    // cashUpReportInformation.id and the envelope posTerminal is the search key, not the UUID. Seed
+    // both server-side from what we already resolved.
+    orderJson.put("posTerminal", order.getObposApplications().getId());
+    String cashupId = order.getObposAppCashup();
+    if (StringUtils.isBlank(cashupId)) {
+      JSONObject cashup = orderJson.optJSONObject("cashUpReportInformation");
+      if (cashup != null) {
+        cashupId = cashup.optString("id", null);
+      }
+    }
+    if (StringUtils.isBlank(cashupId)) {
+      log.warn(
+          "[OCOrder][core] cancel_replace: order {} has no resolvable cashup id "
+              + "(order.obposAppCashup / cashUpReportInformation.id); skipping cancel-and-replace.",
+          order.getDocumentNo());
+      return;
+    }
+    orderJson.put("obposAppCashup", cashupId);
 
     // Native ensures the replacement has a payment schedule before cancel-and-replace.
     if (findOrderPaymentSchedules(order.getId()).isEmpty()) {
