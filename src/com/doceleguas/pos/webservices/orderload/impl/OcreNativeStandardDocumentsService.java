@@ -99,7 +99,9 @@ public class OcreNativeStandardDocumentsService {
         }
       }
       if (toDel == null) {
-        toDel = ol.getOrderedQuantity() != null ? ol.getOrderedQuantity().abs() : BigDecimal.ZERO;
+        // Keep the sign: returns (ordered qty < 0) must carry a negative delivered quantity to
+        // match the native OrderLoader and the negative return shipment movement.
+        toDel = ol.getOrderedQuantity() != null ? ol.getOrderedQuantity() : BigDecimal.ZERO;
       }
       ol.setDeliveredQuantity(toDel);
       OBDal.getInstance().save(ol);
@@ -217,11 +219,19 @@ public class OcreNativeStandardDocumentsService {
    * @return the last {@code lineNo} used (0 if nothing was added)
    */
   private long appendGoodsShipmentLine(ShipmentInOut shipment, OrderLine ol, Locator bin, long lineNo) {
-    BigDecimal qty = ol.getDeliveredQuantity() != null ? ol.getDeliveredQuantity().abs()
+    BigDecimal magnitude = ol.getDeliveredQuantity() != null ? ol.getDeliveredQuantity().abs()
         : (ol.getOrderedQuantity() != null ? ol.getOrderedQuantity().abs() : BigDecimal.ZERO);
-    if (qty.compareTo(BigDecimal.ZERO) == 0) {
+    if (magnitude.compareTo(BigDecimal.ZERO) == 0) {
       return lineNo;
     }
+    // Return lines (ordered qty < 0) must move stock the opposite way: a customer return is a
+    // negative customer shipment so M_UPDATE_INVENTORY (movementQty * -1) puts the goods back in.
+    // Using abs() here shipped returns as positive movements, removing stock instead of restoring
+    // it. Derive the sign from the ordered quantity so it is correct regardless of how
+    // deliveredQuantity was stored.
+    boolean isReturn = ol.getOrderedQuantity() != null
+        && ol.getOrderedQuantity().compareTo(BigDecimal.ZERO) < 0;
+    BigDecimal qty = isReturn ? magnitude.negate() : magnitude;
     long next = lineNo + 10;
     ShipmentInOutLine sil = OBProvider.getInstance().get(ShipmentInOutLine.class);
     sil.setOrganization(ol.getOrganization());

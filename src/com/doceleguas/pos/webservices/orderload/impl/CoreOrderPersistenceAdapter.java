@@ -68,6 +68,7 @@ import org.openbravo.model.financialmgmt.payment.FIN_PaymentScheduleDetail;
 import org.openbravo.model.financialmgmt.payment.PaymentTerm;
 import org.openbravo.model.financialmgmt.tax.TaxRate;
 import org.openbravo.model.materialmgmt.transaction.ShipmentInOut;
+import org.openbravo.model.materialmgmt.transaction.ShipmentInOutLine;
 import org.openbravo.model.pricing.priceadjustment.PriceAdjustment;
 import org.openbravo.model.pricing.pricelist.PriceList;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
@@ -208,6 +209,12 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         ShipmentInOut shipment = nativeStandardDocumentsService.createShipmentIfRequested(order,
             orderJson);
         nativeStandardDocumentsService.createInvoiceIfRequested(order, orderJson, shipment);
+        OBDal.getInstance().refresh(order);
+      } else if (shouldCreateReturnReceipt(orderJson)) {
+        // Verified returns generate a return receipt (negative customer shipment) so the returned
+        // goods go back into stock. Scoped to the goods movement only: no credit note is issued
+        // here (createInvoiceIfRequested would invoice the abs() quantity as a positive invoice).
+        createReturnReceipt(order, orderJson);
         OBDal.getInstance().refresh(order);
       }
       if (shouldCreatePayments(orderJson)) {
@@ -465,6 +472,7 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
 
       OBDal.getInstance().save(line);
       createLineOffers(lineJson, line, baseNetUnitPrice, baseGrossUnitPrice);
+      linkVerifiedReturnToOriginalLine(lineJson, line);
       persistedLines.add(new PersistedOrderLine(line, product, lineJson, payloadLineId));
       sumNet = sumNet.add(lineNet);
       sumGross = sumGross.add(lineGross);
@@ -569,6 +577,94 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       line.getOrderLineOfferList().add(promotion);
       OBDal.getInstance().save(promotion);
     }
+  }
+
+  /**
+   * Verified return linkage. When a synced line carries {@code originalOrderLineId} it is a
+   * verified return of a previously sold line; the refactored pipeline (which replaced the native
+   * {@code OrderLoader}) did not port this behavior, so returns were stored as plain negative-qty
+   * lines unlinked to the original.
+   *
+   * <p>The "Select Items to Return" availability is driven by {@code OrderModel.getReceiptLines}'s
+   * {@code remainingQuantity = ol.qtydelivered - ABS(SUM(ol1.qtydelivered))} where {@code ol1} are
+   * order lines whose {@code goodsShipmentLine} points to a shipment line of the original line
+   * {@code ol}. So the return line must set {@code goodsShipmentLine} to the original line's
+   * delivery shipment line; otherwise the original line keeps showing as fully available and can be
+   * returned again.
+   *
+   * <p>Resolution failures (missing original line, original not yet delivered) are logged and
+   * skipped — they must not break the order sync.
+   */
+  private void linkVerifiedReturnToOriginalLine(JSONObject lineJson, OrderLine line) {
+    String originalOrderLineId = lineJson.optString("originalOrderLineId", null);
+    if (!isLikelyId(originalOrderLineId)) {
+      return;
+    }
+
+    OrderLine original = OBDal.getInstance().get(OrderLine.class, originalOrderLineId);
+    if (original == null) {
+      log.warn(
+          "[OCOrder][core] verified return originalOrderLineId {} not found; line {} left unlinked. order={}.",
+          originalOrderLineId, line.getLineNo(), line.getSalesOrder().getDocumentNo());
+      return;
+    }
+
+    // A verified return line is a return line.
+    if (line.getOrderedQuantity() != null
+        && line.getOrderedQuantity().compareTo(BigDecimal.ZERO) < 0) {
+      line.setReturnline("Y");
+    }
+
+    // The RETURN flow does not run applyPosLineFlagsFromPayload, so deliveredQuantity stays 0 and
+    // the remainingQuantity subquery (ABS(SUM(ol1.qtydelivered))) would not count this return.
+    // Seed the (signed) delivered quantity from the ordered quantity so the original line's
+    // available-to-return amount is reduced. NOTE: this does NOT restore stock — returns still do
+    // not generate a return receipt (separate gap, see linkVerifiedReturnToOriginalLine caller).
+    if (line.getOrderedQuantity() != null
+        && (line.getDeliveredQuantity() == null
+            || line.getDeliveredQuantity().compareTo(BigDecimal.ZERO) == 0)) {
+      line.setDeliveredQuantity(line.getOrderedQuantity());
+    }
+
+    ShipmentInOutLine originalShipmentLine = findOriginalDeliveryShipmentLine(original);
+    if (originalShipmentLine == null) {
+      log.warn(
+          "[OCOrder][core] verified return: no delivery shipment line found for original line {} "
+              + "(product {}); return line {} left unlinked, original may stay available. order={}.",
+          original.getLineNo(),
+          original.getProduct() != null ? original.getProduct().getSearchKey() : "<null>",
+          line.getLineNo(), line.getSalesOrder().getDocumentNo());
+      return;
+    }
+
+    line.setGoodsShipmentLine(originalShipmentLine);
+    OBDal.getInstance().save(line);
+  }
+
+  /**
+   * Resolves the original line's delivery shipment line (positive movement, non-netting) that a
+   * verified return must point its {@code goodsShipmentLine} at. Returns the lowest-lineNo match,
+   * falling back to any positive-movement line if every delivery sits on a netting shipment.
+   */
+  private ShipmentInOutLine findOriginalDeliveryShipmentLine(OrderLine original) {
+    OBCriteria<ShipmentInOutLine> criteria = OBDal.getInstance()
+        .createCriteria(ShipmentInOutLine.class);
+    criteria.add(Restrictions.eq(ShipmentInOutLine.PROPERTY_SALESORDERLINE, original));
+    criteria.add(Restrictions.gt(ShipmentInOutLine.PROPERTY_MOVEMENTQUANTITY, BigDecimal.ZERO));
+    criteria.addOrderBy(ShipmentInOutLine.PROPERTY_LINENO, true);
+    criteria.setFilterOnReadableOrganization(false);
+
+    ShipmentInOutLine fallback = null;
+    for (ShipmentInOutLine sil : criteria.list()) {
+      if (fallback == null) {
+        fallback = sil;
+      }
+      ShipmentInOut receipt = sil.getShipmentReceipt();
+      if (receipt != null && !Boolean.TRUE.equals(receipt.isNettingshipment())) {
+        return sil;
+      }
+    }
+    return fallback;
   }
 
   private void createServiceRelationsForLinkedProducts(Order order,
@@ -1121,6 +1217,34 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
 
   private boolean shouldCreatePayments(JSONObject orderJson) {
     return OrderFlowUtils.classify(orderJson) != OrderFlowType.QUOTATION;
+  }
+
+  /**
+   * True for a completed verified return: it must generate a return receipt so the goods go back
+   * into stock. Kept separate from {@link #shouldCreateStandardPosDocuments} because returns must
+   * NOT run the (positive, abs-quantity) invoice path; only the goods movement is created here.
+   */
+  private boolean shouldCreateReturnReceipt(JSONObject orderJson) {
+    return OrderFlowUtils.isReturnFlow(orderJson)
+        && orderJson.optBoolean("completeTicket", false);
+  }
+
+  /**
+   * Generates the return receipt for a verified return by reusing
+   * {@link OcreNativeStandardDocumentsService#createShipmentIfRequested} with a negative movement
+   * (the return-sign handling lives in {@code appendGoodsShipmentLine}). Restores stock via
+   * {@code M_UPDATE_INVENTORY}. No invoice/credit note is created in this scope.
+   */
+  private void createReturnReceipt(Order order, JSONObject orderJson) throws Exception {
+    if (!orderJson.has("generateShipment")) {
+      orderJson.put("generateShipment", true);
+    }
+    if (!orderJson.optBoolean("generateShipment", false)) {
+      return;
+    }
+    nativeStandardDocumentsService.enrichOrderJsonDefaults(orderJson);
+    nativeStandardDocumentsService.applyPosLineFlagsFromPayload(order, orderJson);
+    nativeStandardDocumentsService.createShipmentIfRequested(order, orderJson);
   }
 
   /**
