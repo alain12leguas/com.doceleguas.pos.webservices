@@ -43,8 +43,10 @@ import org.openbravo.base.model.ModelProvider;
 import org.openbravo.base.provider.OBProvider;
 import org.openbravo.base.session.OBPropertiesProvider;
 import org.openbravo.dal.core.OBContext;
+import org.openbravo.dal.core.TriggerHandler;
 import org.openbravo.dal.service.OBCriteria;
 import org.openbravo.dal.service.OBDal;
+import org.openbravo.erpCommon.businessUtility.CancelAndReplaceUtils;
 import org.openbravo.erpCommon.businessUtility.Tax;
 import org.openbravo.model.ad.system.Client;
 import org.openbravo.model.common.businesspartner.BusinessPartner;
@@ -221,6 +223,8 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
         createBasicPayments(orderJson, order, terminalContext, false);
       }
       OBDal.getInstance().flush();
+
+      applyCancelAndReplaceIfNeeded(order, orderJson);
 
       OcrePosTerminalSupport.applyReportedDocumentSequences(terminalContext.terminal, orderJson);
 
@@ -665,6 +669,72 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
       }
     }
     return fallback;
+  }
+
+  /**
+   * Cancel and Replace. For a {@code step=cancel_replace} sync the inbound order is the
+   * <em>replacement</em>; the payload also carries {@code replacedorder} (the original order id).
+   * The refactored pipeline only persisted the replacement (as a standard sale) and ignored the
+   * cancel-and-replace semantics entirely, so the original order stayed active (double stock +
+   * revenue, no inverse/cancellation order, no linkage).
+   *
+   * <p>This delegates the heavy lifting to the core {@link CancelAndReplaceUtils} — the same code
+   * the native {@code OrderLoader} calls — which creates the inverse (negative) order + netting
+   * shipment (restores stock), nets payments, links original&harr;replacement&harr;inverse and
+   * cancels the original. We only wire {@code replacedorder} on the replacement (the executor reads
+   * it) and ensure a payment schedule exists, mirroring the native prerequisites.
+   *
+   * <p>Scope (Fase 1): goods/stock reversal + linkage + cancellation. No bespoke credit-note
+   * handling beyond what the core executor performs. Cross-store payment organization is not
+   * resolved (uses the replacement's organization).
+   */
+  private void applyCancelAndReplaceIfNeeded(Order order, JSONObject orderJson) {
+    if (!"cancel_replace".equalsIgnoreCase(OrderFlowUtils.resolveStep(orderJson))) {
+      return;
+    }
+    String replacedOrderId = orderJson.optString("replacedorder", null);
+    if (!isLikelyId(replacedOrderId)) {
+      log.warn("[OCOrder][core] cancel_replace without valid replacedorder; skipping. order={}.",
+          order.getDocumentNo());
+      return;
+    }
+    Order original = OBDal.getInstance().get(Order.class, replacedOrderId);
+    if (original == null) {
+      log.warn("[OCOrder][core] cancel_replace replacedorder {} not found; skipping. order={}.",
+          replacedOrderId, order.getDocumentNo());
+      return;
+    }
+    // Idempotency: a re-sync must not cancel/replace twice.
+    if (Boolean.TRUE.equals(original.isCancelled()) || original.getReplacementorder() != null) {
+      log.info(
+          "[OCOrder][core] cancel_replace already applied for original {} (replacement={}); skipping.",
+          original.getDocumentNo(), order.getDocumentNo());
+      return;
+    }
+
+    // The core executor reads newOrder.getReplacedorder(); wire it (and the flag) before calling.
+    order.setReplacedorder(original);
+    order.setCancelandreplace(true);
+    OBDal.getInstance().save(order);
+    // Native ensures the replacement has a payment schedule before cancel-and-replace.
+    if (findOrderPaymentSchedules(order.getId()).isEmpty()) {
+      createOrReuseOrderPaymentSchedule(order);
+    }
+    OBDal.getInstance().flush();
+
+    OBContext.setCrossOrgReferenceAdminMode();
+    TriggerHandler.getInstance().disable();
+    try {
+      // Non-null jsonOrder selects the Web POS path (skips re-posting the already-completed
+      // replacement; uses POS netting-payment behavior).
+      CancelAndReplaceUtils.cancelAndReplaceOrder(order.getId(), orderJson, false);
+    } finally {
+      TriggerHandler.getInstance().enable();
+      OBContext.restorePreviousCrossOrgReferenceMode();
+    }
+    OBDal.getInstance().refresh(order);
+    log.info("[OCOrder][core] cancel_replace done: original={} replaced by replacement={}.",
+        original.getDocumentNo(), order.getDocumentNo());
   }
 
   private void createServiceRelationsForLinkedProducts(Order order,
