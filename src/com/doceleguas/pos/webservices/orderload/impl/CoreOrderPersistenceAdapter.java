@@ -76,6 +76,7 @@ import org.openbravo.model.pricing.pricelist.PriceList;
 import org.openbravo.retail.posterminal.OBPOSAppCashup;
 import org.openbravo.retail.posterminal.OBPOSAppPayment;
 import org.openbravo.retail.posterminal.OBPOSApplications;
+import org.openbravo.retail.posterminal.POSUtils;
 import org.openbravo.retail.posterminal.TerminalTypePaymentMethod;
 import org.openbravo.service.db.DalConnectionProvider;
 import org.openbravo.service.json.JsonConstants;
@@ -716,6 +717,19 @@ public class CoreOrderPersistenceAdapter implements OrderPersistencePort {
     order.setReplacedorder(original);
     order.setCancelandreplace(true);
     OBDal.getInstance().save(order);
+
+    // The core netting-payment path (payOriginalAndInverseOrder) requires
+    // jsonOrder.defaultPaymentType when jsonOrder is non-null; the POS does not send it, so seed it
+    // server-side exactly like the native OrderLoader (POSUtils.setDefaultPaymentType, L558).
+    if (order.getObposApplications() == null || order.getPaymentMethod() == null) {
+      log.warn(
+          "[OCOrder][core] cancel_replace: order {} has no terminal/payment method; cannot seed "
+              + "defaultPaymentType for netting. Skipping cancel-and-replace.",
+          order.getDocumentNo());
+      return;
+    }
+    POSUtils.setDefaultPaymentType(orderJson, order);
+
     // Native ensures the replacement has a payment schedule before cancel-and-replace.
     if (findOrderPaymentSchedules(order.getId()).isEmpty()) {
       createOrReuseOrderPaymentSchedule(order);
